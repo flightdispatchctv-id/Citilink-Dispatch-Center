@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flight Dispatch & Following — Citilink AOMS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .toast { position: fixed; bottom: 24px; right: 24px; z-index: 9999; padding: 12px 20px; border-radius: 8px; color: white; font-weight: 500; opacity: 0; transition: opacity .3s; }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+  <div id="toast" class="toast bg-slate-800"></div>
+
+  <header class="bg-gradient-to-r from-green-800 via-green-700 to-emerald-800 text-white shadow-xl sticky top-0 z-50">
+    <div class="max-w-[1600px] mx-auto px-4 py-3">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+          <div class="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-md">
+            <span class="text-green-700 font-black text-lg">QG</span>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold tracking-wide">FLIGHT DISPATCH & FOLLOWING</h1>
+            <p class="text-xs text-green-200 flex flex-wrap items-center gap-1">
+              <span>CITILINK • FINAL ACFT ROT •</span>
+              <input id="hdr-period" type="text" value="08–09 SEP 2026" class="bg-white/15 border border-white/20 rounded px-1.5 py-0.5 text-xs text-white w-32 font-medium outline-none focus:ring-1 focus:ring-white/40" title="Periode (bisa diubah)" onchange="saveHeaderMeta()" />
+              <span>•</span>
+              <input id="hdr-occ" type="text" value="OCC-QG/OM-0124" class="bg-white/15 border border-white/20 rounded px-1.5 py-0.5 text-xs text-white w-40 font-mono font-medium outline-none focus:ring-1 focus:ring-white/40" title="Nomor OCC (bisa diubah)" onchange="saveHeaderMeta()" />
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-4 text-center bg-black/20 rounded-xl px-4 py-2">
+          <div><div class="text-[10px] text-green-200 uppercase">UTC</div><div class="font-mono font-bold text-sm" id="clock-utc">--:--</div></div>
+          <div class="w-px h-8 bg-white/20"></div>
+          <div><div class="text-[10px] text-green-200 uppercase">WIB</div><div class="font-mono font-bold text-sm" id="clock-wib">--:--</div></div>
+          <div class="w-px h-8 bg-white/20"></div>
+          <div><div class="text-[10px] text-green-200 uppercase">WITA</div><div class="font-mono font-bold text-sm" id="clock-wita">--:--</div></div>
+          <div class="w-px h-8 bg-white/20"></div>
+          <div><div class="text-[10px] text-green-200 uppercase">WIT</div><div class="font-mono font-bold text-sm" id="clock-wit">--:--</div></div>
+        </div>
+        <div class="flex flex-wrap gap-2 items-center">
+          <span id="od-status" class="text-[10px] px-2 py-1 rounded-full bg-black/20 text-green-100">OneDrive: Offline</span>
+          <button id="btn-ms-login" onclick="msLogin()" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm px-3 py-2 rounded-lg">Sign in Microsoft</button>
+          <button id="btn-ms-logout" onclick="msLogout()" class="hidden bg-white/15 hover:bg-white/25 border border-white/20 text-sm px-3 py-2 rounded-lg">Sign out</button>
+          <button onclick="odSyncNow()" class="bg-white/15 hover:bg-white/25 border border-white/20 text-sm px-3 py-2 rounded-lg" title="Tarik & dorong data OneDrive">Sync</button>
+          <button onclick="openMsConfig()" class="bg-white/15 hover:bg-white/25 border border-white/20 text-sm px-3 py-2 rounded-lg" title="Client ID Azure AD">⚙</button>
+          <button onclick="openPasteModal()" class="bg-white text-green-800 hover:bg-green-50 font-semibold text-sm px-3 py-2 rounded-lg">Paste AOMS</button>
+          <button onclick="exportPNG()" class="bg-white/15 hover:bg-white/25 border border-white/20 text-sm px-3 py-2 rounded-lg">PNG</button>
+          <button onclick="exportPDF()" class="bg-white/15 hover:bg-white/25 border border-white/20 text-sm px-3 py-2 rounded-lg">PDF</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Paste AOMS Modal -->
+  <div id="paste-modal" class="fixed inset-0 bg-black/50 z-[100] hidden items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div class="px-5 py-3 border-b flex items-center justify-between">
+        <div>
+          <h3 class="font-bold text-slate-800">Update Data AOMS</h3>
+          <p class="text-xs text-slate-500">Tempel telex FINAL ACFT ROT (format sama seperti sebelumnya)</p>
+        </div>
+        <button onclick="closePasteModal()" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+      </div>
+      <div class="p-4 flex-1 overflow-hidden">
+        <textarea id="paste-area" class="w-full h-64 border rounded-lg p-3 text-xs font-mono focus:ring-2 focus:ring-green-500 outline-none" placeholder="Paste di sini mulai dari baris DATE FLIGHT DEP ARR ETD ETA REG ...&#10;&#10;Contoh:&#10;09.09 QG970    CGK PGK 0325 0440 PK-GLP       320  65  Chandra Nugrahaputra&#10;09.09 QG971    PGK CGK 0510 0620 PK-GLP       320  57  Chandra Nugrahaputra"></textarea>
+        <p id="paste-status" class="text-xs text-slate-500 mt-2">Tempel data lalu pilih Tinjau Data. Data lama tidak akan berubah sebelum Anda menekan Konfirmasi Update.</p>
+        <div id="paste-preview" class="hidden mt-3 border border-emerald-200 rounded-lg overflow-hidden">
+          <div id="paste-preview-summary" class="bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900"></div>
+          <div id="paste-preview-regs" class="px-3 py-2 text-xs text-slate-600 border-b bg-white"></div>
+          <div class="max-h-44 overflow-auto">
+            <table class="w-full text-xs text-left">
+              <thead class="sticky top-0 bg-slate-100 text-slate-600"><tr>
+                <th class="px-2 py-2">#</th><th class="px-2 py-2">Flight</th><th class="px-2 py-2">Route</th><th class="px-2 py-2">ETD</th><th class="px-2 py-2">ETA</th><th class="px-2 py-2">REG</th>
+              </tr></thead>
+              <tbody id="paste-preview-rows" class="divide-y"></tbody>
+            </table>
+          </div>
+          <div class="px-3 py-2 text-[11px] text-amber-800 bg-amber-50">Periksa data di atas. Update hanya dilakukan setelah tombol Konfirmasi Update ditekan.</div>
+        </div>
+      </div>
+      <div class="px-5 py-3 border-t flex gap-2 justify-end">
+        <button onclick="closePasteModal()" class="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm">Batal</button>
+        <button id="btn-preview-data" onclick="parseAndApply()" class="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-semibold">Tinjau Data</button>
+        <button id="btn-confirm-update" onclick="confirmParsedUpdate()" class="hidden px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm font-semibold">Konfirmasi Update</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Microsoft / OneDrive Config Modal -->
+  <div id="ms-config-modal" class="fixed inset-0 bg-black/50 z-[100] hidden items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+      <div class="px-5 py-3 border-b flex items-center justify-between">
+        <div>
+          <h3 class="font-bold text-slate-800">OneDrive Sync — Konfigurasi Microsoft</h3>
+          <p class="text-xs text-slate-500">Isi Client ID dari Azure AD App Registration (SPA)</p>
+        </div>
+        <button onclick="closeMsConfig()" class="text-slate-400 hover:text-slate-600 text-xl">&times;</button>
+      </div>
+      <div class="p-5 space-y-3 text-sm">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Application (client) ID</label>
+          <input id="ms-client-id" type="text" class="w-full border rounded-lg px-3 py-2 font-mono text-xs" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Tenant ID</label>
+          <input id="ms-tenant-id" type="text" class="w-full border rounded-lg px-3 py-2 font-mono text-xs" value="organizations" placeholder="organizations atau GUID tenant" />
+          <p class="text-[10px] text-slate-400 mt-1">Pakai <code>organizations</code> untuk semua akun kerja, atau Tenant ID Citilink</p>
+        </div>
+        <div class="bg-slate-50 border rounded-lg p-3 text-[11px] text-slate-600 space-y-1">
+          <div class="font-semibold text-slate-700">Setup cepat di portal.azure.com:</div>
+          <ol class="list-decimal ml-4 space-y-0.5">
+            <li>App registrations → New registration</li>
+            <li>Supported account: Accounts in any org directory</li>
+            <li>Redirect URI: <b>Single-page application (SPA)</b> → URL file HTML ini (atau http://localhost)</li>
+            <li>API permissions → Microsoft Graph → Delegated: <code>User.Read</code>, <code>Files.ReadWrite</code></li>
+            <li>Copy Application (client) ID ke field di atas</li>
+          </ol>
+          <p class="mt-1">File data: <code>OneDrive/Apps/AOMS_Dispatch/aoms_dispatch_data.json</code></p>
+        </div>
+      </div>
+      <div class="px-5 py-3 border-t flex gap-2 justify-end">
+        <button onclick="closeMsConfig()" class="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm">Tutup</button>
+        <button onclick="saveMsConfig()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold">Simpan & Init</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="w-full max-w-none mx-0 px-3 py-3" id="dashboard-content">
+    <!-- Shift filter + search -->
+    <div class="bg-white rounded-xl border border-slate-200 p-3 mb-4 flex flex-wrap gap-3 items-center">
+      <select id="filter-shift" class="border rounded-lg px-3 py-2 text-sm font-medium" onchange="renderFlightTable();renderLegs();">
+        <option value="">Semua Shift</option>
+        <option value="pagi">Pagi — mulai ETD 03:14 UTC (leg pertama)</option>
+        <option value="siang">Siang — mulai ETD 11:14 UTC (leg pertama)</option>
+        <option value="malam">Malam — mulai ETD 17:45 UTC (leg pertama)</option>
+      </select>
+      <input type="text" id="search" placeholder="Cari Flight / REG / PIC / DXR / Route..." class="flex-1 min-w-[180px] border rounded-lg px-3 py-2 text-sm" oninput="renderFlightTable();renderLegs();" />
+      <select id="filter-reg" class="border rounded-lg px-3 py-2 text-sm" onchange="renderFlightTable();renderLegs();">
+        <option value="">Semua Aircraft</option>
+      </select>
+      <select id="pairing-mode" class="border rounded-lg px-3 py-2 text-sm font-medium bg-emerald-50 border-emerald-200" onchange="onPairingModeChange()" title="Mode penggabungan multi-sector">
+        <option value="chain">Enhance Multisector Dispatch</option>
+        <option value="pair2" selected>Multisector Dispatch (2 Leg Max)</option>
+      </select>
+      <label class="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+        <input type="checkbox" id="filter-approaching-only" class="rounded" onchange="renderLegs()" />
+        Legs ≤ 3 jam
+      </label>
+      <div class="text-sm text-slate-500" id="result-count">0</div>
+    </div>
+
+    <!-- Flight Assignment Table (Excel-like) with editable DXR -->
+    <div class="mb-6 w-full bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+      <div class="bg-slate-800 text-white text-base uppercase px-5 py-4 flex justify-between items-center">
+        <span>Flight List — Assignment (DXR / FP 1 &amp; Latest / Fuel 1 &amp; Latest)</span>
+        <button onclick="saveAssignments()" class="normal-case bg-green-600 hover:bg-green-500 text-white text-sm px-4 py-2 rounded">Simpan Assignment</button>
+      </div>
+      <div class="overflow-auto h-[76vh] min-h-[620px]">
+        <table class="w-full min-w-[2400px] text-left text-base">
+          <thead class="bg-slate-100 sticky top-0 z-10">
+            <tr class="text-slate-600 uppercase">
+              <th class="px-3 py-3">#</th>
+              <th class="px-3 py-3">Shift</th>
+              <th class="px-3 py-3">Flight</th>
+              <th class="px-3 py-3">REG</th>
+              <th class="px-3 py-3">Route</th>
+              <th class="px-3 py-3">ETD UTC</th>
+              <th class="px-3 py-3">ETA UTC</th>
+              <th class="px-3 py-3">PIC</th>
+              <th class="px-3 py-3">PAX</th>
+              <th class="px-3 py-3 bg-sky-50 text-sky-800">FP 1 No.</th>
+              <th class="px-3 py-3 bg-sky-100 text-sky-900">FP Latest No.</th>
+              <th class="px-3 py-3 bg-amber-50 text-amber-900 min-w-[280px]">Remarks / Flight Plan</th>
+              <th class="px-3 py-3 bg-violet-50 text-violet-800">Fuel 1</th>
+              <th class="px-3 py-3 bg-violet-100 text-violet-900">Fuel Latest</th>
+              <th class="px-3 py-3 bg-violet-200 text-violet-950">Fuel Difference</th>
+              <th class="px-3 py-3 bg-rose-50 text-rose-800">ZFW FPL 1</th>
+              <th class="px-3 py-3 bg-rose-100 text-rose-900">ZFW FPL Latest</th>
+              <th class="px-3 py-3 bg-rose-200 text-rose-950">ZFW Difference</th>
+              <th class="px-3 py-3 bg-amber-50 text-amber-800">DXR</th>
+            </tr>
+          </thead>
+          <tbody id="flight-table-body" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Summary -->
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 mb-5" id="summary-cards"></div>
+
+    <!-- All Legs Split View -->
+    <div class="mb-2">
+      <h2 class="text-base font-semibold text-slate-700">All Legs — Split View</h2>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div class="bg-slate-800 text-white text-xs uppercase px-4 py-2 flex justify-between">
+        <span>Split View (same REG + same Captain + gap ETA→ETD ≤ 1 jam)</span>
+        <span class="normal-case text-slate-400">OUT | sectors | IN</span>
+      </div>
+      <div id="legs-body" class="p-3 space-y-2 max-h-[45vh] overflow-auto"></div>
+    </div>
+
+    <p class="text-center text-xs text-slate-400 mt-6">FLIGHT DISPATCH & FOLLOWING • CITILINK INDONESIA • Data dari AOMS Telex FINAL ACFT ROT</p>
+  </main>
+
+  <script>
+const AOMS_DATA = {"flights": [{"date": "08.09", "flight_number": "QG1100", "dep": "HLP", "arr": "JOG", "etd": "22:55", "eta": "00:20", "reg": "PK-GJQ", "ac_type": "ATR", "pax": 17, "pic": "Diaz Andora Nasution", "aircraft": "GJQ"}, {"date": "09.09", "flight_number": "QG1101", "dep": "JOG", "arr": "HLP", "etd": "01:00", "eta": "02:30", "reg": "PK-GJQ", "ac_type": "ATR", "pax": 2, "pic": "Diaz Andora Nasution", "aircraft": "GJQ"}, {"date": "09.09", "flight_number": "QG1104", "dep": "HLP", "arr": "JOG", "etd": "06:40", "eta": "08:05", "reg": "PK-GJQ", "ac_type": "ATR", "pax": 17, "pic": "Jopi Restanto", "aircraft": "GJQ"}, {"date": "09.09", "flight_number": "QG1105", "dep": "JOG", "arr": "HLP", "etd": "08:30", "eta": "10:00", "reg": "PK-GJQ", "ac_type": "ATR", "pax": 7, "pic": "Jopi Restanto", "aircraft": "GJQ"}, {"date": "09.09", "flight_number": "QG1494", "dep": "BPN", "arr": "BDJ", "etd": "02:35", "eta": "03:55", "reg": "PK-GJT", "ac_type": "ATR", "pax": 19, "pic": "Richard", "aircraft": "GJT"}, {"date": "09.09", "flight_number": "QG1495", "dep": "BDJ", "arr": "BPN", "etd": "04:20", "eta": "05:40", "reg": "PK-GJT", "ac_type": "ATR", "pax": 3, "pic": "Richard", "aircraft": "GJT"}, {"date": "08.09", "flight_number": "QG940", "dep": "CGK", "arr": "BTH", "etd": "22:15", "eta": "00:00", "reg": "PK-GLG", "ac_type": "320", "pax": 16, "pic": "Achmed Aprinikov", "aircraft": "GLG"}, {"date": "09.09", "flight_number": "QG941", "dep": "BTH", "arr": "CGK", "etd": "00:40", "eta": "02:25", "reg": "PK-GLG", "ac_type": "320", "pax": 80, "pic": "Achmed Aprinikov", "aircraft": "GLG"}, {"date": "09.09", "flight_number": "QG974", "dep": "CGK", "arr": "TNJ", "etd": "03:25", "eta": "05:05", "reg": "PK-GLG", "ac_type": "320", "pax": 38, "pic": "Achmed Aprinikov", "aircraft": "GLG"}, {"date": "09.09", "flight_number": "QG975", "dep": "TNJ", "arr": "CGK", "etd": "05:35", "eta": "07:15", "reg": "PK-GLG", "ac_type": "320", "pax": 11, "pic": "Achmed Aprinikov", "aircraft": "GLG"}, {"date": "09.09", "flight_number": "QG888", "dep": "CGK", "arr": "KNO", "etd": "14:30", "eta": "16:50", "reg": "PK-GLG", "ac_type": "320", "pax": 38, "pic": "Kennedy Sampurno", "aircraft": "GLG"}, {"date": "08.09", "flight_number": "QG692", "dep": "SUB", "arr": "DPS", "etd": "22:30", "eta": "23:35", "reg": "PK-GLI", "ac_type": "320", "pax": 181, "pic": "Ardani Yusuf", "aircraft": "GLI"}, {"date": "09.09", "flight_number": "QG691", "dep": "DPS", "arr": "SUB", "etd": "00:15", "eta": "01:25", "reg": "PK-GLI", "ac_type": "320", "pax": 71, "pic": "Ardani Yusuf", "aircraft": "GLI"}, {"date": "09.09", "flight_number": "QG354", "dep": "SUB", "arr": "UPG", "etd": "01:55", "eta": "03:30", "reg": "PK-GLI", "ac_type": "320", "pax": 29, "pic": "Abdul Rahman Suparmo", "aircraft": "GLI"}, {"date": "09.09", "flight_number": "QG343", "dep": "UPG", "arr": "DPS", "etd": "04:00", "eta": "05:30", "reg": "PK-GLI", "ac_type": "320", "pax": 39, "pic": "Abdul Rahman Suparmo", "aircraft": "GLI"}, {"date": "09.09", "flight_number": "QG342", "dep": "DPS", "arr": "UPG", "etd": "06:00", "eta": "07:30", "reg": "PK-GLI", "ac_type": "320", "pax": 18, "pic": "Abdul Rahman Suparmo", "aircraft": "GLI"}, {"date": "09.09", "flight_number": "QG353", "dep": "UPG", "arr": "SUB", "etd": "08:00", "eta": "09:40", "reg": "PK-GLI", "ac_type": "320", "pax": 26, "pic": "Fajar Aji Kusuma", "aircraft": "GLI"}, {"date": "09.09", "flight_number": "QG173", "dep": "SUB", "arr": "HLP", "etd": "10:15", "eta": "11:45", "reg": "PK-GLI", "ac_type": "320", "pax": 7, "pic": "Fajar Aji Kusuma", "aircraft": "GLI"}, {"date": "09.09", "flight_number": "QG172", "dep": "HLP", "arr": "SUB", "etd": "12:15", "eta": "13:45", "reg": "PK-GLI", "ac_type": "320", "pax": 9, "pic": "Andy Diana Fitrih Ab", "aircraft": "GLI"}, {"date": "08.09", "flight_number": "QG952", "dep": "CGK", "arr": "PDG", "etd": "23:10", "eta": "01:00", "reg": "PK-GLK", "ac_type": "320", "pax": 11, "pic": "Billie Andico Megant", "aircraft": "GLK"}, {"date": "09.09", "flight_number": "QG953", "dep": "PDG", "arr": "CGK", "etd": "01:35", "eta": "03:30", "reg": "PK-GLK", "ac_type": "320", "pax": 95, "pic": "Billie Andico Megant", "aircraft": "GLK"}, {"date": "09.09", "flight_number": "QG916", "dep": "CGK", "arr": "KNO", "etd": "04:20", "eta": "06:40", "reg": "PK-GLK", "ac_type": "320", "pax": 88, "pic": "Mochamad Luthfi", "aircraft": "GLK"}, {"date": "09.09", "flight_number": "QG919", "dep": "KNO", "arr": "CGK", "etd": "07:10", "eta": "09:35", "reg": "PK-GLK", "ac_type": "320", "pax": 70, "pic": "Lucas Kelwulan", "aircraft": "GLK"}, {"date": "09.09", "flight_number": "QG426", "dep": "CGK", "arr": "UPG", "etd": "10:50", "eta": "13:20", "reg": "PK-GLK", "ac_type": "320", "pax": 38, "pic": "Rudy Martino T Panja", "aircraft": "GLK"}, {"date": "09.09", "flight_number": "QG427", "dep": "UPG", "arr": "CGK", "etd": "13:50", "eta": "16:10", "reg": "PK-GLK", "ac_type": "320", "pax": 15, "pic": "Rudy Martino T Panja", "aircraft": "GLK"}, {"date": "08.09", "flight_number": "QG910", "dep": "CGK", "arr": "KNO", "etd": "22:30", "eta": "00:50", "reg": "PK-GLL", "ac_type": "320", "pax": 21, "pic": "I Made Donny Herlang", "aircraft": "GLL"}, {"date": "09.09", "flight_number": "QG883", "dep": "KNO", "arr": "CGK", "etd": "01:20", "eta": "03:45", "reg": "PK-GLL", "ac_type": "320", "pax": 100, "pic": "I Made Donny Herlang", "aircraft": "GLL"}, {"date": "09.09", "flight_number": "QG452", "dep": "CGK", "arr": "PKY", "etd": "04:45", "eta": "06:35", "reg": "PK-GLL", "ac_type": "320", "pax": 46, "pic": "Rahadian Dimas B Nug", "aircraft": "GLL"}, {"date": "09.09", "flight_number": "QG453", "dep": "PKY", "arr": "CGK", "etd": "07:05", "eta": "08:50", "reg": "PK-GLL", "ac_type": "320", "pax": 32, "pic": "Rahadian Dimas B Nug", "aircraft": "GLL"}, {"date": "09.09", "flight_number": "QG764", "dep": "CGK", "arr": "SOC", "etd": "09:30", "eta": "10:45", "reg": "PK-GLL", "ac_type": "320", "pax": 15, "pic": "Rahadian Dimas B Nug", "aircraft": "GLL"}, {"date": "09.09", "flight_number": "QG765", "dep": "SOC", "arr": "CGK", "etd": "11:15", "eta": "12:30", "reg": "PK-GLL", "ac_type": "320", "pax": 19, "pic": "Rahadian Dimas B Nug", "aircraft": "GLL"}, {"date": "08.09", "flight_number": "QG430", "dep": "SUB", "arr": "BPN", "etd": "22:05", "eta": "23:45", "reg": "PK-GLM", "ac_type": "320", "pax": 188, "pic": "Firman Setia Fauzi", "aircraft": "GLM"}, {"date": "09.09", "flight_number": "QG435", "dep": "BPN", "arr": "SUB", "etd": "00:15", "eta": "01:45", "reg": "PK-GLM", "ac_type": "320", "pax": 29, "pic": "Firman Setia Fauzi", "aircraft": "GLM"}, {"date": "09.09", "flight_number": "QG486", "dep": "SUB", "arr": "BDJ", "etd": "02:15", "eta": "03:25", "reg": "PK-GLM", "ac_type": "320", "pax": 79, "pic": "Firman Setia Fauzi", "aircraft": "GLM"}, {"date": "09.09", "flight_number": "QG487", "dep": "BDJ", "arr": "SUB", "etd": "03:55", "eta": "05:10", "reg": "PK-GLM", "ac_type": "320", "pax": 55, "pic": "Firman Setia Fauzi", "aircraft": "GLM"}, {"date": "09.09", "flight_number": "QG668", "dep": "SUB", "arr": "DPS", "etd": "05:45", "eta": "06:50", "reg": "PK-GLM", "ac_type": "320", "pax": 62, "pic": "Munif Karaman", "aircraft": "GLM"}, {"date": "09.09", "flight_number": "QG669", "dep": "DPS", "arr": "SUB", "etd": "07:30", "eta": "08:40", "reg": "PK-GLM", "ac_type": "320", "pax": 21, "pic": "Munif Karaman", "aircraft": "GLM"}, {"date": "09.09", "flight_number": "QG698", "dep": "SUB", "arr": "DPS", "etd": "09:50", "eta": "10:55", "reg": "PK-GLM", "ac_type": "320", "pax": 44, "pic": "Muhammad Trisna Yuwa", "aircraft": "GLM"}, {"date": "09.09", "flight_number": "QG699", "dep": "DPS", "arr": "SUB", "etd": "11:30", "eta": "12:40", "reg": "PK-GLM", "ac_type": "320", "pax": 15, "pic": "Muhammad Trisna Yuwa", "aircraft": "GLM"}, {"date": "09.09", "flight_number": "QG356", "dep": "SUB", "arr": "UPG", "etd": "13:10", "eta": "14:45", "reg": "PK-GLM", "ac_type": "320", "pax": 11, "pic": "Muhammad Trisna Yuwa", "aircraft": "GLM"}, {"date": "08.09", "flight_number": "QG738", "dep": "CGK", "arr": "SUB", "etd": "23:05", "eta": "00:45", "reg": "PK-GLN", "ac_type": "320", "pax": 7, "pic": "Alfian Ferdinand Dya", "aircraft": "GLN"}, {"date": "09.09", "flight_number": "QG739", "dep": "SUB", "arr": "CGK", "etd": "02:00", "eta": "03:35", "reg": "PK-GLN", "ac_type": "320", "pax": 59, "pic": "Alfian Ferdinand Dya", "aircraft": "GLN"}, {"date": "09.09", "flight_number": "QG416", "dep": "CGK", "arr": "PNK", "etd": "04:15", "eta": "05:50", "reg": "PK-GLN", "ac_type": "320", "pax": 37, "pic": "Alfian Ferdinand Dya", "aircraft": "GLN"}, {"date": "09.09", "flight_number": "QG419", "dep": "PNK", "arr": "CGK", "etd": "06:20", "eta": "07:50", "reg": "PK-GLN", "ac_type": "320", "pax": 42, "pic": "Alfian Ferdinand Dya", "aircraft": "GLN"}, {"date": "09.09", "flight_number": "QG992", "dep": "CGK", "arr": "TKG", "etd": "08:55", "eta": "09:40", "reg": "PK-GLN", "ac_type": "320", "pax": 73, "pic": "Rezky Noveldi", "aircraft": "GLN"}, {"date": "09.09", "flight_number": "QG993", "dep": "TKG", "arr": "CGK", "etd": "10:10", "eta": "11:00", "reg": "PK-GLN", "ac_type": "320", "pax": 17, "pic": "Rezky Noveldi", "aircraft": "GLN"}, {"date": "09.09", "flight_number": "QG798", "dep": "CGK", "arr": "SRG", "etd": "11:40", "eta": "12:50", "reg": "PK-GLN", "ac_type": "320", "pax": 45, "pic": "Rezky Noveldi", "aircraft": "GLN"}, {"date": "09.09", "flight_number": "QG799", "dep": "SRG", "arr": "CGK", "etd": "13:20", "eta": "14:35", "reg": "PK-GLN", "ac_type": "320", "pax": 13, "pic": "Rezky Noveldi", "aircraft": "GLN"}, {"date": "08.09", "flight_number": "QG936", "dep": "CGK", "arr": "PKU", "etd": "22:45", "eta": "00:30", "reg": "PK-GLO", "ac_type": "320", "pax": 14, "pic": "Rd.R.Iin.Irjayanti", "aircraft": "GLO"}, {"date": "09.09", "flight_number": "QG939", "dep": "PKU", "arr": "CGK", "etd": "01:00", "eta": "02:50", "reg": "PK-GLO", "ac_type": "320", "pax": 74, "pic": "Rd.R.Iin.Irjayanti", "aircraft": "GLO"}, {"date": "09.09", "flight_number": "QG990", "dep": "CGK", "arr": "BKS", "etd": "03:30", "eta": "04:50", "reg": "PK-GLO", "ac_type": "320", "pax": 67, "pic": "Rd.R.Iin.Irjayanti", "aircraft": "GLO"}, {"date": "09.09", "flight_number": "QG991", "dep": "BKS", "arr": "CGK", "etd": "05:20", "eta": "06:40", "reg": "PK-GLO", "ac_type": "320", "pax": 42, "pic": "Rd.R.Iin.Irjayanti", "aircraft": "GLO"}, {"date": "09.09", "flight_number": "QG978", "dep": "CGK", "arr": "KNO", "etd": "07:20", "eta": "09:40", "reg": "PK-GLO", "ac_type": "320", "pax": 53, "pic": "Nico Purnomoadi", "aircraft": "GLO"}, {"date": "09.09", "flight_number": "QG979", "dep": "KNO", "arr": "CGK", "etd": "10:30", "eta": "12:55", "reg": "PK-GLO", "ac_type": "320", "pax": 38, "pic": "Nico Purnomoadi", "aircraft": "GLO"}, {"date": "08.09", "flight_number": "QG250", "dep": "CGK", "arr": "UPG", "etd": "20:40", "eta": "23:10", "reg": "PK-GLP", "ac_type": "320", "pax": 17, "pic": "Oktario Hermawan Rif", "aircraft": "GLP"}, {"date": "09.09", "flight_number": "QG251", "dep": "UPG", "arr": "CGK", "etd": "00:00", "eta": "02:20", "reg": "PK-GLP", "ac_type": "320", "pax": 85, "pic": "Oktario Hermawan Rif", "aircraft": "GLP"}, {"date": "09.09", "flight_number": "QG970", "dep": "CGK", "arr": "PGK", "etd": "03:25", "eta": "04:40", "reg": "PK-GLP", "ac_type": "320", "pax": 65, "pic": "Chandra Nugrahaputra", "aircraft": "GLP"}, {"date": "09.09", "flight_number": "QG971", "dep": "PGK", "arr": "CGK", "etd": "05:10", "eta": "06:20", "reg": "PK-GLP", "ac_type": "320", "pax": 57, "pic": "Chandra Nugrahaputra", "aircraft": "GLP"}, {"date": "09.09", "flight_number": "QG958", "dep": "CGK", "arr": "PDG", "etd": "07:00", "eta": "08:50", "reg": "PK-GLP", "ac_type": "320", "pax": 36, "pic": "Chandra Nugrahaputra", "aircraft": "GLP"}, {"date": "09.09", "flight_number": "QG959", "dep": "PDG", "arr": "CGK", "etd": "09:20", "eta": "11:15", "reg": "PK-GLP", "ac_type": "320", "pax": 30, "pic": "Chandra Nugrahaputra", "aircraft": "GLP"}, {"date": "09.09", "flight_number": "QG938", "dep": "CGK", "arr": "PKU", "etd": "11:55", "eta": "13:40", "reg": "PK-GLP", "ac_type": "320", "pax": 34, "pic": "Erwin Yulianto", "aircraft": "GLP"}, {"date": "08.09", "flight_number": "QG670", "dep": "SUB", "arr": "LOP", "etd": "23:00", "eta": "00:10", "reg": "PK-GLQ", "ac_type": "320", "pax": 1, "pic": "Adma Bayu Kurniawan", "aircraft": "GLQ"}, {"date": "09.09", "flight_number": "QG671", "dep": "LOP", "arr": "SUB", "etd": "00:40", "eta": "01:50", "reg": "PK-GLQ", "ac_type": "320", "pax": 21, "pic": "Adma Bayu Kurniawan", "aircraft": "GLQ"}, {"date": "09.09", "flight_number": "QG948", "dep": "SUB", "arr": "BTH", "etd": "02:20", "eta": "04:40", "reg": "PK-GLQ", "ac_type": "320", "pax": 85, "pic": "Adma Bayu Kurniawan", "aircraft": "GLQ"}, {"date": "09.09", "flight_number": "QG949", "dep": "BTH", "arr": "SUB", "etd": "05:10", "eta": "07:30", "reg": "PK-GLQ", "ac_type": "320", "pax": 71, "pic": "Adma Bayu Kurniawan", "aircraft": "GLQ"}, {"date": "09.09", "flight_number": "QG488", "dep": "SUB", "arr": "BDJ", "etd": "09:10", "eta": "10:20", "reg": "PK-GLQ", "ac_type": "320", "pax": 15, "pic": "Engelbertus Betha Me", "aircraft": "GLQ"}, {"date": "09.09", "flight_number": "QG481", "dep": "BDJ", "arr": "CGK", "etd": "11:40", "eta": "13:25", "reg": "PK-GLQ", "ac_type": "320", "pax": 28, "pic": "Engelbertus Betha Me", "aircraft": "GLQ"}, {"date": "08.09", "flight_number": "QG904", "dep": "CGK", "arr": "TKG", "etd": "23:30", "eta": "00:20", "reg": "PK-GLR", "ac_type": "320", "pax": 15, "pic": "Frendy Hardhianta", "aircraft": "GLR"}, {"date": "09.09", "flight_number": "QG905", "dep": "TKG", "arr": "CGK", "etd": "00:50", "eta": "01:40", "reg": "PK-GLR", "ac_type": "320", "pax": 88, "pic": "Frendy Hardhianta", "aircraft": "GLR"}, {"date": "09.09", "flight_number": "QG932", "dep": "CGK", "arr": "PKU", "etd": "02:20", "eta": "04:05", "reg": "PK-GLR", "ac_type": "320", "pax": 56, "pic": "Frendy Hardhianta", "aircraft": "GLR"}, {"date": "09.09", "flight_number": "QG933", "dep": "PKU", "arr": "CGK", "etd": "04:35", "eta": "06:25", "reg": "PK-GLR", "ac_type": "320", "pax": 48, "pic": "Frendy Hardhianta", "aircraft": "GLR"}, {"date": "09.09", "flight_number": "QG340", "dep": "CGK", "arr": "UPG", "etd": "07:15", "eta": "09:45", "reg": "PK-GLR", "ac_type": "320", "pax": 61, "pic": "Fradista Krista Endr", "aircraft": "GLR"}, {"date": "09.09", "flight_number": "QG341", "dep": "UPG", "arr": "CGK", "etd": "10:15", "eta": "12:35", "reg": "PK-GLR", "ac_type": "320", "pax": 46, "pic": "Fradista Krista Endr", "aircraft": "GLR"}, {"date": "09.09", "flight_number": "QG728", "dep": "CGK", "arr": "SUB", "etd": "14:00", "eta": "15:40", "reg": "PK-GLR", "ac_type": "320", "pax": 4, "pic": "Fradista Krista Endr", "aircraft": "GLR"}, {"date": "08.09", "flight_number": "QG989", "dep": "PLM", "arr": "BTH", "etd": "23:00", "eta": "00:10", "reg": "PK-GLS", "ac_type": "320", "pax": 237, "pic": "Christian Diamond Ru", "aircraft": "GLS"}, {"date": "09.09", "flight_number": "QG924", "dep": "BTH", "arr": "KNO", "etd": "00:40", "eta": "02:05", "reg": "PK-GLS", "ac_type": "320", "pax": 70, "pic": "Christian Diamond Ru", "aircraft": "GLS"}, {"date": "09.09", "flight_number": "QG925", "dep": "KNO", "arr": "BTH", "etd": "02:35", "eta": "04:10", "reg": "PK-GLS", "ac_type": "320", "pax": 81, "pic": "Christian Diamond Ru", "aircraft": "GLS"}, {"date": "09.09", "flight_number": "QG934", "dep": "BTH", "arr": "PKU", "etd": "04:40", "eta": "05:40", "reg": "PK-GLS", "ac_type": "320", "pax": 30, "pic": "Christian Diamond Ru", "aircraft": "GLS"}, {"date": "09.09", "flight_number": "QG935", "dep": "PKU", "arr": "BTH", "etd": "06:20", "eta": "07:20", "reg": "PK-GLS", "ac_type": "320", "pax": 46, "pic": "Brama Theo Seta", "aircraft": "GLS"}, {"date": "09.09", "flight_number": "QG922", "dep": "BTH", "arr": "KNO", "etd": "07:50", "eta": "09:15", "reg": "PK-GLS", "ac_type": "320", "pax": 28, "pic": "Brama Theo Seta", "aircraft": "GLS"}, {"date": "09.09", "flight_number": "QG923", "dep": "KNO", "arr": "BTH", "etd": "09:45", "eta": "11:20", "reg": "PK-GLS", "ac_type": "320", "pax": 42, "pic": "Brama Theo Seta", "aircraft": "GLS"}, {"date": "09.09", "flight_number": "QG988", "dep": "BTH", "arr": "PLM", "etd": "11:50", "eta": "13:00", "reg": "PK-GLS", "ac_type": "320", "pax": 35, "pic": "Brama Theo Seta", "aircraft": "GLS"}, {"date": "09.09", "flight_number": "QG983", "dep": "PLM", "arr": "CGK", "etd": "13:30", "eta": "14:40", "reg": "PK-GLS", "ac_type": "320", "pax": 14, "pic": "Zulmy Kurnia Awaludd", "aircraft": "GLS"}, {"date": "09.09", "flight_number": "QG196", "dep": "HLP", "arr": "DPS", "etd": "00:05", "eta": "01:55", "reg": "PK-GLT", "ac_type": "320", "pax": 66, "pic": "Gandhi Mahendra", "aircraft": "GLT"}, {"date": "09.09", "flight_number": "QG197", "dep": "DPS", "arr": "HLP", "etd": "02:25", "eta": "04:20", "reg": "PK-GLT", "ac_type": "320", "pax": 53, "pic": "Gandhi Mahendra", "aircraft": "GLT"}, {"date": "09.09", "flight_number": "QG180", "dep": "HLP", "arr": "PDG", "etd": "05:05", "eta": "06:55", "reg": "PK-GLT", "ac_type": "320", "pax": 42, "pic": "Denny Chandra Badan", "aircraft": "GLT"}, {"date": "09.09", "flight_number": "QG181", "dep": "PDG", "arr": "HLP", "etd": "07:25", "eta": "09:25", "reg": "PK-GLT", "ac_type": "320", "pax": 35, "pic": "Denny Chandra Badan", "aircraft": "GLT"}, {"date": "09.09", "flight_number": "QG987", "dep": "PLM", "arr": "CGK", "etd": "02:30", "eta": "03:40", "reg": "PK-GLU", "ac_type": "320", "pax": 87, "pic": "Dedy Hermansyah", "aircraft": "GLU"}, {"date": "09.09", "flight_number": "QG976", "dep": "CGK", "arr": "TJQ", "etd": "04:55", "eta": "06:05", "reg": "PK-GLU", "ac_type": "320", "pax": 44, "pic": "Otto Noordraven", "aircraft": "GLU"}, {"date": "09.09", "flight_number": "QG977", "dep": "TJQ", "arr": "CGK", "etd": "06:35", "eta": "07:50", "reg": "PK-GLU", "ac_type": "320", "pax": 35, "pic": "Otto Noordraven", "aircraft": "GLU"}, {"date": "09.09", "flight_number": "QG964", "dep": "CGK", "arr": "DJB", "etd": "08:35", "eta": "10:00", "reg": "PK-GLU", "ac_type": "320", "pax": 39, "pic": "M.Ikhwan Adzani", "aircraft": "GLU"}, {"date": "09.09", "flight_number": "QG965", "dep": "DJB", "arr": "CGK", "etd": "10:30", "eta": "11:50", "reg": "PK-GLU", "ac_type": "320", "pax": 10, "pic": "M.Ikhwan Adzani", "aircraft": "GLU"}, {"date": "09.09", "flight_number": "QG882", "dep": "CGK", "arr": "KNO", "etd": "13:00", "eta": "15:20", "reg": "PK-GLU", "ac_type": "320", "pax": 40, "pic": "M.Ikhwan Adzani", "aircraft": "GLU"}, {"date": "08.09", "flight_number": "QG810", "dep": "KNO", "arr": "BDO", "etd": "23:30", "eta": "02:10", "reg": "PK-GLW", "ac_type": "320", "pax": 1, "pic": "Ernest DB Laban", "aircraft": "GLW"}, {"date": "09.09", "flight_number": "QG822", "dep": "BDO", "arr": "DPS", "etd": "02:55", "eta": "04:40", "reg": "PK-GLW", "ac_type": "320", "pax": 111, "pic": "Ernest DB Laban", "aircraft": "GLW"}, {"date": "09.09", "flight_number": "QG823", "dep": "DPS", "arr": "BDO", "etd": "05:10", "eta": "07:10", "reg": "PK-GLW", "ac_type": "320", "pax": 42, "pic": "Ernest DB Laban", "aircraft": "GLW"}, {"date": "09.09", "flight_number": "QG833", "dep": "BDO", "arr": "SUB", "etd": "07:50", "eta": "09:30", "reg": "PK-GLW", "ac_type": "320", "pax": 14, "pic": "Adriano Sugianto", "aircraft": "GLW"}, {"date": "09.09", "flight_number": "QG834", "dep": "SUB", "arr": "BDO", "etd": "10:00", "eta": "11:30", "reg": "PK-GLW", "ac_type": "320", "pax": 16, "pic": "Deni Ardianto", "aircraft": "GLW"}, {"date": "09.09", "flight_number": "QG815", "dep": "BDO", "arr": "KNO", "etd": "12:00", "eta": "14:30", "reg": "PK-GLW", "ac_type": "320", "pax": 19, "pic": "Deni Ardianto", "aircraft": "GLW"}, {"date": "08.09", "flight_number": "QG330", "dep": "CGK", "arr": "KDI", "etd": "20:40", "eta": "23:30", "reg": "PK-GLX", "ac_type": "320", "pax": 20, "pic": "Yusak Yermias Sir", "aircraft": "GLX"}, {"date": "09.09", "flight_number": "QG331", "dep": "KDI", "arr": "CGK", "etd": "00:00", "eta": "02:40", "reg": "PK-GLX", "ac_type": "320", "pax": 53, "pic": "Yusak Yermias Sir", "aircraft": "GLX"}, {"date": "09.09", "flight_number": "QG422", "dep": "CGK", "arr": "AAP", "etd": "04:10", "eta": "06:30", "reg": "PK-GLX", "ac_type": "320", "pax": 54, "pic": "Risang Tanoyo Jati", "aircraft": "GLX"}, {"date": "09.09", "flight_number": "QG423", "dep": "AAP", "arr": "CGK", "etd": "07:00", "eta": "09:10", "reg": "PK-GLX", "ac_type": "320", "pax": 34, "pic": "Risang Tanoyo Jati", "aircraft": "GLX"}, {"date": "09.09", "flight_number": "QG216", "dep": "CGK", "arr": "UPG", "etd": "13:30", "eta": "16:00", "reg": "PK-GLX", "ac_type": "320", "pax": 16, "pic": "Antoni Veeone Ailyan", "aircraft": "GLX"}, {"date": "09.09", "flight_number": "QG217", "dep": "UPG", "arr": "CGK", "etd": "16:30", "eta": "18:50", "reg": "PK-GLX", "ac_type": "320", "pax": 104, "pic": "Antoni Veeone Ailyan", "aircraft": "GLX"}, {"date": "08.09", "flight_number": "QG690", "dep": "DPS", "arr": "SUB", "etd": "23:05", "eta": "00:15", "reg": "PK-GLY", "ac_type": "320", "pax": 167, "pic": "Andriyanto Asianto", "aircraft": "GLY"}, {"date": "09.09", "flight_number": "QG460", "dep": "SUB", "arr": "AAP", "etd": "00:50", "eta": "02:35", "reg": "PK-GLY", "ac_type": "320", "pax": 34, "pic": "Andriyanto Asianto", "aircraft": "GLY"}, {"date": "09.09", "flight_number": "QG461", "dep": "AAP", "arr": "SUB", "etd": "03:05", "eta": "04:45", "reg": "PK-GLY", "ac_type": "320", "pax": 29, "pic": "Andriyanto Asianto", "aircraft": "GLY"}, {"date": "09.09", "flight_number": "QG418", "dep": "SUB", "arr": "PNK", "etd": "05:20", "eta": "07:05", "reg": "PK-GLY", "ac_type": "320", "pax": 30, "pic": "Oki Indrajaya", "aircraft": "GLY"}, {"date": "09.09", "flight_number": "QG417", "dep": "PNK", "arr": "SUB", "etd": "07:35", "eta": "09:15", "reg": "PK-GLY", "ac_type": "320", "pax": 29, "pic": "Oki Indrajaya", "aircraft": "GLY"}, {"date": "09.09", "flight_number": "QG171", "dep": "SUB", "arr": "CGK", "etd": "13:15", "eta": "14:50", "reg": "PK-GLY", "ac_type": "320", "pax": 16, "pic": "Reza Kurniawan", "aircraft": "GLY"}, {"date": "08.09", "flight_number": "QG439", "dep": "BPN", "arr": "CGK", "etd": "22:10", "eta": "00:25", "reg": "PK-GLZ", "ac_type": "320", "pax": 20, "pic": "Dhanurendra Virdriar", "aircraft": "GLZ"}, {"date": "09.09", "flight_number": "QG438", "dep": "CGK", "arr": "BPN", "etd": "01:10", "eta": "03:30", "reg": "PK-GLZ", "ac_type": "320", "pax": 54, "pic": "Dhanurendra Virdriar", "aircraft": "GLZ"}, {"date": "09.09", "flight_number": "QG437", "dep": "BPN", "arr": "CGK", "etd": "05:05", "eta": "07:20", "reg": "PK-GLZ", "ac_type": "320", "pax": 68, "pic": "Dhanurendra Virdriar", "aircraft": "GLZ"}, {"date": "09.09", "flight_number": "QG646", "dep": "CGK", "arr": "LOP", "etd": "08:00", "eta": "10:00", "reg": "PK-GLZ", "ac_type": "320", "pax": 31, "pic": "Charles Triharto Wid", "aircraft": "GLZ"}, {"date": "09.09", "flight_number": "QG647", "dep": "LOP", "arr": "CGK", "etd": "10:30", "eta": "12:30", "reg": "PK-GLZ", "ac_type": "320", "pax": 14, "pic": "Charles Triharto Wid", "aircraft": "GLZ"}, {"date": "09.09", "flight_number": "QG986", "dep": "CGK", "arr": "PLM", "etd": "13:00", "eta": "14:10", "reg": "PK-GLZ", "ac_type": "320", "pax": 12, "pic": "Charles Triharto Wid", "aircraft": "GLZ"}, {"date": "08.09", "flight_number": "QG357", "dep": "UPG", "arr": "SUB", "etd": "22:25", "eta": "00:05", "reg": "PK-GQA", "ac_type": "320", "pax": 172, "pic": "David Kurniawan", "aircraft": "GQA"}, {"date": "09.09", "flight_number": "QG175", "dep": "SUB", "arr": "CGK", "etd": "00:35", "eta": "02:10", "reg": "PK-GQA", "ac_type": "320", "pax": 55, "pic": "David Kurniawan", "aircraft": "GQA"}, {"date": "09.09", "flight_number": "QG686", "dep": "CGK", "arr": "DPS", "etd": "03:00", "eta": "04:55", "reg": "PK-GQA", "ac_type": "320", "pax": 51, "pic": "Novyarso Satyo Nugro", "aircraft": "GQA"}, {"date": "09.09", "flight_number": "QG687", "dep": "DPS", "arr": "CGK", "etd": "05:55", "eta": "07:55", "reg": "PK-GQA", "ac_type": "320", "pax": 73, "pic": "Novyarso Satyo Nugro", "aircraft": "GQA"}, {"date": "09.09", "flight_number": "QG688", "dep": "CGK", "arr": "DPS", "etd": "08:35", "eta": "10:30", "reg": "PK-GQA", "ac_type": "320", "pax": 61, "pic": "Antony Hastanuddin", "aircraft": "GQA"}, {"date": "09.09", "flight_number": "QG689", "dep": "DPS", "arr": "CGK", "etd": "11:00", "eta": "13:00", "reg": "PK-GQA", "ac_type": "320", "pax": 18, "pic": "Antony Hastanuddin", "aircraft": "GQA"}, {"date": "08.09", "flight_number": "QG300", "dep": "CGK", "arr": "MDC", "etd": "18:00", "eta": "21:25", "reg": "PK-GQC", "ac_type": "320", "pax": 15, "pic": "Fransisco Redi", "aircraft": "GQC"}, {"date": "08.09", "flight_number": "QG301", "dep": "MDC", "arr": "CGK", "etd": "21:55", "eta": "01:15", "reg": "PK-GQC", "ac_type": "320", "pax": 11, "pic": "Rachmat Budiharto", "aircraft": "GQC"}, {"date": "09.09", "flight_number": "QG640", "dep": "CGK", "arr": "LOP", "etd": "02:00", "eta": "04:00", "reg": "PK-GQC", "ac_type": "320", "pax": 56, "pic": "Julius Eeng", "aircraft": "GQC"}, {"date": "09.09", "flight_number": "QG641", "dep": "LOP", "arr": "CGK", "etd": "04:30", "eta": "06:30", "reg": "PK-GQC", "ac_type": "320", "pax": 55, "pic": "Julius Eeng", "aircraft": "GQC"}, {"date": "09.09", "flight_number": "QG968", "dep": "CGK", "arr": "BTH", "etd": "07:10", "eta": "08:55", "reg": "PK-GQC", "ac_type": "320", "pax": 54, "pic": "Oky Prabowo", "aircraft": "GQC"}, {"date": "09.09", "flight_number": "QG969", "dep": "BTH", "arr": "CGK", "etd": "09:25", "eta": "11:10", "reg": "PK-GQC", "ac_type": "320", "pax": 24, "pic": "Oky Prabowo", "aircraft": "GQC"}, {"date": "09.09", "flight_number": "QG946", "dep": "CGK", "arr": "BTH", "etd": "12:05", "eta": "13:50", "reg": "PK-GQC", "ac_type": "320", "pax": 38, "pic": "Oky Prabowo", "aircraft": "GQC"}, {"date": "09.09", "flight_number": "QG947", "dep": "BTH", "arr": "CGK", "etd": "14:20", "eta": "16:05", "reg": "PK-GQC", "ac_type": "320", "pax": 8, "pic": "Oky Prabowo", "aircraft": "GQC"}, {"date": "08.09", "flight_number": "QG10", "dep": "HLP", "arr": "KNO", "etd": "23:15", "eta": "01:35", "reg": "PK-GQD", "ac_type": "320", "pax": 2, "pic": "Michael Stefano Dani", "aircraft": "GQD"}, {"date": "09.09", "flight_number": "QG11", "dep": "KNO", "arr": "HLP", "etd": "02:20", "eta": "04:45", "reg": "PK-GQD", "ac_type": "320", "pax": 59, "pic": "Michael Stefano Dani", "aircraft": "GQD"}, {"date": "09.09", "flight_number": "QG176", "dep": "HLP", "arr": "SUB", "etd": "05:30", "eta": "07:00", "reg": "PK-GQD", "ac_type": "320", "pax": 22, "pic": "Adhi Komojoyo", "aircraft": "GQD"}, {"date": "09.09", "flight_number": "QG177", "dep": "SUB", "arr": "HLP", "etd": "07:35", "eta": "09:05", "reg": "PK-GQD", "ac_type": "320", "pax": 6, "pic": "Adhi Komojoyo", "aircraft": "GQD"}, {"date": "09.09", "flight_number": "QG32", "dep": "HLP", "arr": "PKU", "etd": "09:50", "eta": "11:35", "reg": "PK-GQD", "ac_type": "320", "pax": 34, "pic": "Adhi Komojoyo", "aircraft": "GQD"}, {"date": "09.09", "flight_number": "QG33", "dep": "PKU", "arr": "HLP", "etd": "12:05", "eta": "13:55", "reg": "PK-GQD", "ac_type": "320", "pax": 8, "pic": "Adhi Komojoyo", "aircraft": "GQD"}, {"date": "08.09", "flight_number": "QG680", "dep": "CGK", "arr": "DPS", "etd": "21:40", "eta": "23:35", "reg": "PK-GQF", "ac_type": "320", "pax": 20, "pic": "Deden Wahyu Hidayat", "aircraft": "GQF"}, {"date": "09.09", "flight_number": "QG500", "dep": "DPS", "arr": "DIL", "etd": "01:00", "eta": "03:05", "reg": "PK-GQF", "ac_type": "320", "pax": 36, "pic": "Deden Wahyu Hidayat", "aircraft": "GQF"}, {"date": "09.09", "flight_number": "QG501", "dep": "DIL", "arr": "DPS", "etd": "04:05", "eta": "06:05", "reg": "PK-GQF", "ac_type": "320", "pax": 11, "pic": "Deden Wahyu Hidayat", "aircraft": "GQF"}, {"date": "09.09", "flight_number": "QG681", "dep": "DPS", "arr": "CGK", "etd": "07:05", "eta": "09:05", "reg": "PK-GQF", "ac_type": "320", "pax": 51, "pic": "Rizky Adewinardi", "aircraft": "GQF"}, {"date": "09.09", "flight_number": "QG526", "dep": "CGK", "arr": "SIN", "etd": "10:10", "eta": "12:00", "reg": "PK-GQF", "ac_type": "320", "pax": 6, "pic": "Noorwan Ardian Hakim", "aircraft": "GQF"}, {"date": "09.09", "flight_number": "QG527", "dep": "SIN", "arr": "CGK", "etd": "13:00", "eta": "14:55", "reg": "PK-GQF", "ac_type": "320", "pax": 1, "pic": "Noorwan Ardian Hakim", "aircraft": "GQF"}, {"date": "09.09", "flight_number": "QG906", "dep": "CGK", "arr": "BKS", "etd": "05:25", "eta": "06:50", "reg": "PK-GQG", "ac_type": "320", "pax": 61, "pic": "Fradika Septiansyah", "aircraft": "GQG"}, {"date": "09.09", "flight_number": "QG907", "dep": "BKS", "arr": "CGK", "etd": "07:25", "eta": "08:45", "reg": "PK-GQG", "ac_type": "320", "pax": 28, "pic": "Fradika Septiansyah", "aircraft": "GQG"}, {"date": "09.09", "flight_number": "QG662", "dep": "CGK", "arr": "DPS", "etd": "09:40", "eta": "11:35", "reg": "PK-GQG", "ac_type": "320", "pax": 34, "pic": "Fradika Septiansyah", "aircraft": "GQG"}, {"date": "09.09", "flight_number": "QG667", "dep": "DPS", "arr": "CGK", "etd": "12:10", "eta": "14:10", "reg": "PK-GQG", "ac_type": "320", "pax": 14, "pic": "Fradika Septiansyah", "aircraft": "GQG"}, {"date": "09.09", "flight_number": "QG480", "dep": "CGK", "arr": "BDJ", "etd": "00:00", "eta": "01:55", "reg": "PK-GQH", "ac_type": "320", "pax": 68, "pic": "Gerry Okta Rumahorbo", "aircraft": "GQH"}, {"date": "09.09", "flight_number": "QG795", "dep": "BDJ", "arr": "SRG", "etd": "02:25", "eta": "03:45", "reg": "PK-GQH", "ac_type": "320", "pax": 38, "pic": "Gerry Okta Rumahorbo", "aircraft": "GQH"}, {"date": "09.09", "flight_number": "QG794", "dep": "SRG", "arr": "BDJ", "etd": "04:15", "eta": "05:35", "reg": "PK-GQH", "ac_type": "320", "pax": 66, "pic": "Gerry Okta Rumahorbo", "aircraft": "GQH"}, {"date": "09.09", "flight_number": "QG495", "dep": "BDJ", "arr": "SUB", "etd": "06:05", "eta": "07:20", "reg": "PK-GQH", "ac_type": "320", "pax": 43, "pic": "Gerry Okta Rumahorbo", "aircraft": "GQH"}, {"date": "09.09", "flight_number": "QG693", "dep": "SUB", "arr": "DPS", "etd": "12:50", "eta": "13:55", "reg": "PK-GQH", "ac_type": "320", "pax": 36, "pic": "Arie Baihaqy", "aircraft": "GQH"}, {"date": "08.09", "flight_number": "QG937", "dep": "PKU", "arr": "CGK", "etd": "23:10", "eta": "01:00", "reg": "PK-GQI", "ac_type": "320", "pax": 133, "pic": "Luthfi Zulfiqar", "aircraft": "GQI"}, {"date": "09.09", "flight_number": "QG490", "dep": "CGK", "arr": "BDJ", "etd": "02:00", "eta": "03:55", "reg": "PK-GQI", "ac_type": "320", "pax": 92, "pic": "Djoly Mulyadi Karned", "aircraft": "GQI"}, {"date": "09.09", "flight_number": "QG491", "dep": "BDJ", "arr": "CGK", "etd": "04:25", "eta": "06:10", "reg": "PK-GQI", "ac_type": "320", "pax": 87, "pic": "Djoly Mulyadi Karned", "aircraft": "GQI"}, {"date": "09.09", "flight_number": "QG414", "dep": "CGK", "arr": "PNK", "etd": "06:55", "eta": "08:30", "reg": "PK-GQI", "ac_type": "320", "pax": 30, "pic": "Patric Adri Astowo", "aircraft": "GQI"}, {"date": "09.09", "flight_number": "QG415", "dep": "PNK", "arr": "CGK", "etd": "09:05", "eta": "10:40", "reg": "PK-GQI", "ac_type": "320", "pax": 24, "pic": "Patric Adri Astowo", "aircraft": "GQI"}, {"date": "09.09", "flight_number": "QG776", "dep": "CGK", "arr": "YIA", "etd": "11:30", "eta": "12:45", "reg": "PK-GQI", "ac_type": "320", "pax": 49, "pic": "Andrie Sofyan", "aircraft": "GQI"}, {"date": "08.09", "flight_number": "QG212", "dep": "CGK", "arr": "UPG", "etd": "22:00", "eta": "00:30", "reg": "PK-GQK", "ac_type": "320", "pax": 5, "pic": "Ahmad Noval Rizal Mu", "aircraft": "GQK"}, {"date": "09.09", "flight_number": "QG351", "dep": "UPG", "arr": "SUB", "etd": "02:45", "eta": "04:25", "reg": "PK-GQK", "ac_type": "320", "pax": 50, "pic": "Ahmad Noval Rizal Mu", "aircraft": "GQK"}, {"date": "09.09", "flight_number": "QG350", "dep": "SUB", "arr": "UPG", "etd": "04:55", "eta": "06:30", "reg": "PK-GQK", "ac_type": "320", "pax": 43, "pic": "Ahmad Noval Rizal Mu", "aircraft": "GQK"}, {"date": "09.09", "flight_number": "QG213", "dep": "UPG", "arr": "CGK", "etd": "07:20", "eta": "09:40", "reg": "PK-GQK", "ac_type": "320", "pax": 44, "pic": "Stesso Vittorio Sopa", "aircraft": "GQK"}, {"date": "09.09", "flight_number": "QG944", "dep": "CGK", "arr": "BTH", "etd": "10:20", "eta": "12:05", "reg": "PK-GQK", "ac_type": "320", "pax": 52, "pic": "Stesso Vittorio Sopa", "aircraft": "GQK"}, {"date": "09.09", "flight_number": "QG945", "dep": "BTH", "arr": "CGK", "etd": "12:35", "eta": "14:20", "reg": "PK-GQK", "ac_type": "320", "pax": 6, "pic": "Stesso Vittorio Sopa", "aircraft": "GQK"}, {"date": "08.09", "flight_number": "QG840", "dep": "CGK", "arr": "BTH", "etd": "23:45", "eta": "01:30", "reg": "PK-GQM", "ac_type": "320", "pax": 8, "pic": "Farry Sukma Pertala", "aircraft": "GQM"}, {"date": "09.09", "flight_number": "QG841", "dep": "BTH", "arr": "CGK", "etd": "02:00", "eta": "03:45", "reg": "PK-GQM", "ac_type": "320", "pax": 61, "pic": "Farry Sukma Pertala", "aircraft": "GQM"}, {"date": "09.09", "flight_number": "QG790", "dep": "CGK", "arr": "SRG", "etd": "04:25", "eta": "05:35", "reg": "PK-GQM", "ac_type": "320", "pax": 66, "pic": "Farry Sukma Pertala", "aircraft": "GQM"}, {"date": "09.09", "flight_number": "QG791", "dep": "SRG", "arr": "CGK", "etd": "06:30", "eta": "07:45", "reg": "PK-GQM", "ac_type": "320", "pax": 66, "pic": "Farry Sukma Pertala", "aircraft": "GQM"}, {"date": "09.09", "flight_number": "QG502", "dep": "CGK", "arr": "KUL", "etd": "08:55", "eta": "11:10", "reg": "PK-GQM", "ac_type": "320", "pax": 12, "pic": "Anggun Respati Dimas", "aircraft": "GQM"}, {"date": "09.09", "flight_number": "QG503", "dep": "KUL", "arr": "CGK", "etd": "12:10", "eta": "14:40", "reg": "PK-GQM", "ac_type": "320", "pax": 8, "pic": "Anggun Respati Dimas", "aircraft": "GQM"}, {"date": "08.09", "flight_number": "QG884", "dep": "CGK", "arr": "DTB", "etd": "23:55", "eta": "02:00", "reg": "PK-GQN", "ac_type": "320", "pax": 94, "pic": "Anton Tri Laksono", "aircraft": "GQN"}, {"date": "09.09", "flight_number": "QG885", "dep": "DTB", "arr": "CGK", "etd": "02:30", "eta": "04:45", "reg": "PK-GQN", "ac_type": "320", "pax": 48, "pic": "Anton Tri Laksono", "aircraft": "GQN"}, {"date": "09.09", "flight_number": "QG966", "dep": "CGK", "arr": "DJB", "etd": "06:50", "eta": "08:15", "reg": "PK-GQN", "ac_type": "320", "pax": 56, "pic": "Erwin Yulianto", "aircraft": "GQN"}, {"date": "09.09", "flight_number": "QG967", "dep": "DJB", "arr": "CGK", "etd": "08:45", "eta": "10:10", "reg": "PK-GQN", "ac_type": "320", "pax": 34, "pic": "Erwin Yulianto", "aircraft": "GQN"}, {"date": "09.09", "flight_number": "QG914", "dep": "CGK", "arr": "KNO", "etd": "11:30", "eta": "13:50", "reg": "PK-GQN", "ac_type": "320", "pax": 40, "pic": "Aji Busyrol Munir", "aircraft": "GQN"}, {"date": "09.09", "flight_number": "QG915", "dep": "KNO", "arr": "CGK", "etd": "14:30", "eta": "16:55", "reg": "PK-GQN", "ac_type": "320", "pax": 51, "pic": "Aji Busyrol Munir", "aircraft": "GQN"}, {"date": "08.09", "flight_number": "QG775", "dep": "YIA", "arr": "CGK", "etd": "23:05", "eta": "00:20", "reg": "PK-GQQ", "ac_type": "320", "pax": 39, "pic": "Jhonni Harianto", "aircraft": "GQQ"}, {"date": "09.09", "flight_number": "QG912", "dep": "CGK", "arr": "KNO", "etd": "01:00", "eta": "03:20", "reg": "PK-GQQ", "ac_type": "320", "pax": 67, "pic": "Jhonni Harianto", "aircraft": "GQQ"}, {"date": "09.09", "flight_number": "QG913", "dep": "KNO", "arr": "CGK", "etd": "03:50", "eta": "06:15", "reg": "PK-GQQ", "ac_type": "320", "pax": 92, "pic": "Jhonni Harianto", "aircraft": "GQQ"}, {"date": "09.09", "flight_number": "QG446", "dep": "CGK", "arr": "BPN", "etd": "06:55", "eta": "09:15", "reg": "PK-GQQ", "ac_type": "320", "pax": 66, "pic": "Purbolaksito", "aircraft": "GQQ"}, {"date": "09.09", "flight_number": "QG429", "dep": "BPN", "arr": "UPG", "etd": "09:45", "eta": "11:05", "reg": "PK-GQQ", "ac_type": "320", "pax": 21, "pic": "Purbolaksito", "aircraft": "GQQ"}, {"date": "09.09", "flight_number": "QG428", "dep": "UPG", "arr": "BPN", "etd": "11:35", "eta": "12:55", "reg": "PK-GQQ", "ac_type": "320", "pax": 8, "pic": "Purbolaksito", "aircraft": "GQQ"}, {"date": "08.09", "flight_number": "QG911", "dep": "KNO", "arr": "CGK", "etd": "22:00", "eta": "00:25", "reg": "PK-GQS", "ac_type": "320", "pax": 30, "pic": "Agung Hari Wahyudi", "aircraft": "GQS"}, {"date": "09.09", "flight_number": "QG972", "dep": "CGK", "arr": "PGK", "etd": "01:05", "eta": "02:25", "reg": "PK-GQS", "ac_type": "320", "pax": 40, "pic": "S.S Mampu Widodo", "aircraft": "GQS"}, {"date": "09.09", "flight_number": "QG973", "dep": "PGK", "arr": "CGK", "etd": "02:55", "eta": "04:10", "reg": "PK-GQS", "ac_type": "320", "pax": 61, "pic": "S.S Mampu Widodo", "aircraft": "GQS"}, {"date": "09.09", "flight_number": "QG736", "dep": "CGK", "arr": "SUB", "etd": "04:50", "eta": "06:30", "reg": "PK-GQS", "ac_type": "320", "pax": 58, "pic": "S.S Mampu Widodo", "aircraft": "GQS"}, {"date": "09.09", "flight_number": "QG737", "dep": "SUB", "arr": "CGK", "etd": "07:00", "eta": "08:35", "reg": "PK-GQS", "ac_type": "320", "pax": 25, "pic": "S.S Mampu Widodo", "aircraft": "GQS"}, {"date": "09.09", "flight_number": "QG954", "dep": "CGK", "arr": "PDG", "etd": "10:25", "eta": "12:15", "reg": "PK-GQS", "ac_type": "320", "pax": 69, "pic": "Vindra Adityarachman", "aircraft": "GQS"}, {"date": "09.09", "flight_number": "QG955", "dep": "PDG", "arr": "CGK", "etd": "12:45", "eta": "14:40", "reg": "PK-GQS", "ac_type": "320", "pax": 8, "pic": "Vindra Adityarachman", "aircraft": "GQS"}, {"date": "08.09", "flight_number": "QG602", "dep": "CGK", "arr": "KOE", "etd": "19:05", "eta": "22:05", "reg": "PK-GQT", "ac_type": "320", "pax": 14, "pic": "Mohamad Johan Satria", "aircraft": "GQT"}, {"date": "08.09", "flight_number": "QG603", "dep": "KOE", "arr": "CGK", "etd": "22:35", "eta": "01:30", "reg": "PK-GQT", "ac_type": "320", "pax": 15, "pic": "Mohamad Johan Satria", "aircraft": "GQT"}, {"date": "09.09", "flight_number": "QG8770", "dep": "CGK", "arr": "YIA", "etd": "02:55", "eta": "04:10", "reg": "PK-GQT", "ac_type": "320", "pax": 0, "pic": "H.Rafiqul Alam Hamid", "aircraft": "GQT"}, {"date": "09.09", "flight_number": "QG8771", "dep": "YIA", "arr": "CGK", "etd": "04:40", "eta": "05:55", "reg": "PK-GQT", "ac_type": "320", "pax": 0, "pic": "H.Rafiqul Alam Hamid", "aircraft": "GQT"}, {"date": "09.09", "flight_number": "QG918", "dep": "CGK", "arr": "KNO", "etd": "06:35", "eta": "08:55", "reg": "PK-GQT", "ac_type": "320", "pax": 57, "pic": "Adhe Ridho", "aircraft": "GQT"}, {"date": "09.09", "flight_number": "QG917", "dep": "KNO", "arr": "CGK", "etd": "09:30", "eta": "11:55", "reg": "PK-GQT", "ac_type": "320", "pax": 47, "pic": "Mohammad  Isa Syahle", "aircraft": "GQT"}, {"date": "09.09", "flight_number": "QG726", "dep": "CGK", "arr": "SUB", "etd": "12:35", "eta": "14:15", "reg": "PK-GQT", "ac_type": "320", "pax": 10, "pic": "Mohammad  Isa Syahle", "aircraft": "GQT"}, {"date": "08.09", "flight_number": "QG436", "dep": "CGK", "arr": "BPN", "etd": "22:10", "eta": "00:30", "reg": "PK-GQU", "ac_type": "320", "pax": 17, "pic": "Rizka Aprisandy", "aircraft": "GQU"}, {"date": "09.09", "flight_number": "QG400", "dep": "BPN", "arr": "TRK", "etd": "01:15", "eta": "02:30", "reg": "PK-GQU", "ac_type": "320", "pax": 78, "pic": "Rizka Aprisandy", "aircraft": "GQU"}, {"date": "09.09", "flight_number": "QG401", "dep": "TRK", "arr": "BPN", "etd": "03:00", "eta": "04:20", "reg": "PK-GQU", "ac_type": "320", "pax": 35, "pic": "Rizka Aprisandy", "aircraft": "GQU"}, {"date": "09.09", "flight_number": "QG850", "dep": "BPN", "arr": "BDO", "etd": "05:00", "eta": "07:10", "reg": "PK-GQU", "ac_type": "320", "pax": 27, "pic": "Dimas Nugroho", "aircraft": "GQU"}, {"date": "09.09", "flight_number": "QG851", "dep": "BDO", "arr": "BPN", "etd": "08:00", "eta": "10:10", "reg": "PK-GQU", "ac_type": "320", "pax": 34, "pic": "Dimas Nugroho", "aircraft": "GQU"}, {"date": "09.09", "flight_number": "QG447", "dep": "BPN", "arr": "CGK", "etd": "10:40", "eta": "12:55", "reg": "PK-GQU", "ac_type": "320", "pax": 28, "pic": "Dimas Nugroho", "aircraft": "GQU"}, {"date": "08.09", "flight_number": "QG780", "dep": "UPG", "arr": "YIA", "etd": "23:00", "eta": "01:00", "reg": "PK-GTA", "ac_type": "320", "pax": 183, "pic": "Nursalim", "aircraft": "GTA"}, {"date": "09.09", "flight_number": "QG786", "dep": "YIA", "arr": "BTH", "etd": "01:45", "eta": "03:55", "reg": "PK-GTA", "ac_type": "320", "pax": 58, "pic": "Nursalim", "aircraft": "GTA"}, {"date": "09.09", "flight_number": "QG787", "dep": "BTH", "arr": "YIA", "etd": "04:25", "eta": "06:40", "reg": "PK-GTA", "ac_type": "320", "pax": 51, "pic": "Ikramuddin Malik", "aircraft": "GTA"}, {"date": "09.09", "flight_number": "QG784", "dep": "YIA", "arr": "BPN", "etd": "07:45", "eta": "10:05", "reg": "PK-GTA", "ac_type": "320", "pax": 20, "pic": "Areza Pahala", "aircraft": "GTA"}, {"date": "09.09", "flight_number": "QG785", "dep": "BPN", "arr": "YIA", "etd": "10:35", "eta": "12:40", "reg": "PK-GTA", "ac_type": "320", "pax": 15, "pic": "Areza Pahala", "aircraft": "GTA"}, {"date": "09.09", "flight_number": "QG783", "dep": "YIA", "arr": "UPG", "etd": "13:10", "eta": "15:25", "reg": "PK-GTA", "ac_type": "320", "pax": 3, "pic": "Areza Pahala", "aircraft": "GTA"}, {"date": "09.09", "flight_number": "QG960", "dep": "CGK", "arr": "DJB", "etd": "00:00", "eta": "01:25", "reg": "PK-GTC", "ac_type": "320", "pax": 54, "pic": "Abdul Fatah Nadji Ba", "aircraft": "GTC"}, {"date": "09.09", "flight_number": "QG961", "dep": "DJB", "arr": "CGK", "etd": "01:55", "eta": "03:20", "reg": "PK-GTC", "ac_type": "320", "pax": 59, "pic": "Abdul Fatah Nadji Ba", "aircraft": "GTC"}, {"date": "09.09", "flight_number": "QG942", "dep": "CGK", "arr": "BTH", "etd": "04:05", "eta": "05:50", "reg": "PK-GTC", "ac_type": "320", "pax": 86, "pic": "Abdul Fatah Nadji Ba", "aircraft": "GTC"}, {"date": "09.09", "flight_number": "QG943", "dep": "BTH", "arr": "CGK", "etd": "06:20", "eta": "08:05", "reg": "PK-GTC", "ac_type": "320", "pax": 47, "pic": "Abdul Fatah Nadji Ba", "aircraft": "GTC"}, {"date": "09.09", "flight_number": "QG886", "dep": "CGK", "arr": "KNO", "etd": "09:05", "eta": "11:25", "reg": "PK-GTC", "ac_type": "320", "pax": 71, "pic": "Ferry Yustim", "aircraft": "GTC"}, {"date": "09.09", "flight_number": "QG887", "dep": "KNO", "arr": "CGK", "etd": "11:55", "eta": "14:20", "reg": "PK-GTC", "ac_type": "320", "pax": 43, "pic": "Ferry Yustim", "aircraft": "GTC"}, {"date": "08.09", "flight_number": "QG522", "dep": "CGK", "arr": "SIN", "etd": "23:20", "eta": "01:10", "reg": "PK-GTF", "ac_type": "320", "pax": 86, "pic": "Zildjian Eka Putra R", "aircraft": "GTF"}, {"date": "09.09", "flight_number": "QG523", "dep": "SIN", "arr": "CGK", "etd": "02:10", "eta": "04:05", "reg": "PK-GTF", "ac_type": "320", "pax": 12, "pic": "Zildjian Eka Putra R", "aircraft": "GTF"}, {"date": "09.09", "flight_number": "QG512", "dep": "CGK", "arr": "DMK", "etd": "05:30", "eta": "09:15", "reg": "PK-GTF", "ac_type": "320", "pax": 1, "pic": "Makhmud Fajar", "aircraft": "GTF"}, {"date": "09.09", "flight_number": "QG513", "dep": "DMK", "arr": "CGK", "etd": "10:15", "eta": "13:55", "reg": "PK-GTF", "ac_type": "320", "pax": 3, "pic": "Makhmud Fajar", "aircraft": "GTF"}, {"date": "08.09", "flight_number": "QG980", "dep": "CGK", "arr": "PLM", "etd": "23:00", "eta": "00:10", "reg": "PK-GTG", "ac_type": "320", "pax": 14, "pic": "Andrie Eka Setyadi", "aircraft": "GTG"}, {"date": "09.09", "flight_number": "QG981", "dep": "PLM", "arr": "CGK", "etd": "00:40", "eta": "01:50", "reg": "PK-GTG", "ac_type": "320", "pax": 76, "pic": "Andrie Eka Setyadi", "aircraft": "GTG"}, {"date": "09.09", "flight_number": "QG8772", "dep": "CGK", "arr": "YIA", "etd": "04:20", "eta": "05:35", "reg": "PK-GTG", "ac_type": "320", "pax": 0, "pic": "Defri Halim", "aircraft": "GTG"}, {"date": "09.09", "flight_number": "QG773", "dep": "YIA", "arr": "CGK", "etd": "06:05", "eta": "07:20", "reg": "PK-GTG", "ac_type": "320", "pax": 36, "pic": "Defri Halim", "aircraft": "GTG"}, {"date": "09.09", "flight_number": "QG716", "dep": "CGK", "arr": "SUB", "etd": "08:05", "eta": "09:45", "reg": "PK-GTG", "ac_type": "320", "pax": 20, "pic": "Kadek Purbawa Widya", "aircraft": "GTG"}, {"date": "09.09", "flight_number": "QG717", "dep": "SUB", "arr": "CGK", "etd": "10:15", "eta": "11:50", "reg": "PK-GTG", "ac_type": "320", "pax": 16, "pic": "Kadek Purbawa Widya", "aircraft": "GTG"}, {"date": "08.09", "flight_number": "QG889", "dep": "KNO", "arr": "CGK", "etd": "23:10", "eta": "01:35", "reg": "PK-GTI", "ac_type": "320", "pax": 201, "pic": "Joseph Andy Arisasmi", "aircraft": "GTI"}, {"date": "09.09", "flight_number": "QG718", "dep": "CGK", "arr": "SUB", "etd": "02:15", "eta": "03:55", "reg": "PK-GTI", "ac_type": "320", "pax": 40, "pic": "Agung Triyono Safar", "aircraft": "GTI"}, {"date": "09.09", "flight_number": "QG719", "dep": "SUB", "arr": "CGK", "etd": "04:25", "eta": "06:00", "reg": "PK-GTI", "ac_type": "320", "pax": 42, "pic": "Agung Triyono Safar", "aircraft": "GTI"}, {"date": "09.09", "flight_number": "QG996", "dep": "CGK", "arr": "TKG", "etd": "06:50", "eta": "07:35", "reg": "PK-GTI", "ac_type": "320", "pax": 62, "pic": "Agung Triyono Safar", "aircraft": "GTI"}, {"date": "09.09", "flight_number": "QG997", "dep": "TKG", "arr": "CGK", "etd": "08:05", "eta": "08:55", "reg": "PK-GTI", "ac_type": "320", "pax": 47, "pic": "Agung Triyono Safar", "aircraft": "GTI"}, {"date": "09.09", "flight_number": "QG982", "dep": "CGK", "arr": "PLM", "etd": "10:15", "eta": "11:25", "reg": "PK-GTI", "ac_type": "320", "pax": 76, "pic": "Radhitya Hangga Yudh", "aircraft": "GTI"}], "legs": [[0], [1], [2, 3], [4, 5], [6], [7, 8, 9], [10], [11, 12], [13, 14, 15], [16, 17], [18], [19], [20], [21], [22], [23, 24], [25], [26], [27, 28, 29, 30], [31, 32, 33, 34], [35, 36], [37, 38, 39], [40], [41, 42, 43], [44, 45, 46, 47], [48], [49, 50, 51], [52, 53], [54, 55], [56, 57, 58, 59], [60], [61], [62, 63, 64], [65], [66], [67], [68, 69, 70], [71, 72], [73], [74], [75, 76, 77], [78, 79, 80, 81], [82], [83, 84], [85, 86], [87], [88, 89], [90, 91], [92], [93], [94, 95], [96], [97, 98], [99, 100], [101, 102], [103, 104], [105], [106, 107], [108, 109], [110], [111], [112], [113], [114, 115, 116], [117], [118], [119, 120], [121, 122], [123], [124], [125, 126], [127, 128, 129, 130], [131], [132], [133, 134, 135, 136], [137], [138, 139], [140], [141, 142], [143, 144, 145, 146], [147, 148, 149, 150], [151], [152], [153, 154], [155, 156], [157], [158], [159, 160], [161, 162, 163], [164], [165, 166, 167], [168, 169], [170], [171], [172, 173], [174, 175], [176], [177, 178], [179, 180, 181], [182], [183, 184, 185, 186], [187, 188], [189, 190], [191, 192], [193], [194, 195], [196], [197, 198], [199, 200, 201], [202], [203], [204], [205, 206, 207], [208, 209, 210, 211], [212, 213], [214], [215], [216, 217], [218], [219], [220, 221], [222, 223], [224], [225, 226, 227, 228], [229]]};
+
+</script>
+  <script>
+    let flights = [];
+    let legs = []; // array of arrays of indices
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2500);
+    }
+
+    // Clocks
+    function updateClocks() {
+      const now = new Date();
+      const fmt = (offset) => {
+        const utc = now.getTime() + now.getTimezoneOffset()*60000;
+        return new Date(utc + offset*3600000).toTimeString().slice(0,5);
+      };
+      document.getElementById('clock-utc').textContent = fmt(0);
+      document.getElementById('clock-wib').textContent = fmt(7);
+      document.getElementById('clock-wita').textContent = fmt(8);
+      document.getElementById('clock-wit').textContent = fmt(9);
+    }
+    setInterval(updateClocks, 1000); updateClocks();
+
+    // AOMS times are already UTC — display as-is (no conversion).
+    // Example: QG300 ETD 18:00 UTC, ETA 21:25 UTC
+    function toUTC(t) {
+      if (!t || !String(t).includes(':')) return '-';
+      let [h, m] = String(t).split(':').map(Number);
+      if (isNaN(h) || isNaN(m)) return '-';
+      return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    }
+
+    // Compare ETD (UTC) against current UTC time
+    function minutesUntil(etd) {
+      if (!etd || !etd.includes(':')) return null;
+      const [h, m] = etd.split(':').map(Number);
+      if (isNaN(h) || isNaN(m)) return null;
+      const now = new Date();
+      const utcNow = new Date(now.getTime() + now.getTimezoneOffset() * 60000);
+      const target = new Date(utcNow);
+      target.setHours(h, m, 0, 0);
+      let diff = (target - utcNow) / 60000;
+      if (diff < -12 * 60) {
+        target.setDate(target.getDate() + 1);
+        diff = (target - utcNow) / 60000;
+      }
+      return diff;
+    }
+
+    function timeToMin(t) {
+      const [h,m] = String(t).split(':').map(Number);
+      return h*60+m;
+    }
+
+    function gapMin(eta, etd, d1, d2) {
+      let e1 = timeToMin(eta), e2 = timeToMin(etd);
+      if (d1 !== d2 || e2 < e1) e2 += 1440;
+      return e2 - e1;
+    }
+
+    // Normalize PIC for matching (trim, collapse spaces, case-insensitive)
+    function normPic(s) {
+      return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    }
+
+    // Pairing mode: 'chain' = Alt1 rantai bebas | 'pair2' = Alt2 max 2 sector per FP
+    function getPairingMode() {
+      const el = document.getElementById('pairing-mode');
+      return el ? el.value : 'pair2';
+    }
+
+    // Multi-sector: same REG + same PIC + gap ETA→ETD ≤ 60 menit
+    // Alt 1 (chain): boleh 3+ sector dalam 1 leg
+    // Alt 2 (pair2): maksimal 2 sector = 1 Flight Plan (contoh QG430-QG435; QG486-QG487 terpisah)
+    function buildLegs() {
+      const maxSectors = getPairingMode() === 'pair2' ? 2 : 999;
+
+      const order = flights.map((f, i) => i).sort((ia, ib) => {
+        const a = flights[ia], b = flights[ib];
+        if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+        return timeToMin(a.etd) - timeToMin(b.etd);
+      });
+
+      const used = new Set();
+      const result = [];
+      for (const i of order) {
+        if (used.has(i)) continue;
+        const chain = [i];
+        used.add(i);
+        let j = i;
+        while (chain.length < maxSectors) {
+          let found = false;
+          for (const k of order) {
+            if (used.has(k)) continue;
+            const a = flights[j], b = flights[k];
+            if (a.reg !== b.reg) continue;
+            if (normPic(a.pic) !== normPic(b.pic) || !normPic(a.pic)) continue;
+            const g = gapMin(a.eta, b.etd, a.date, b.date);
+            if (g >= 0 && g <= 60) {
+              chain.push(k);
+              used.add(k);
+              j = k;
+              found = true;
+              break;
+            }
+          }
+          if (!found) break;
+        }
+        result.push(chain);
+      }
+      return result;
+    }
+
+    function onPairingModeChange() {
+      legs = buildLegs();
+      renderAll();
+      const mode = getPairingMode();
+      showToast(mode === 'pair2'
+        ? 'Multisector Dispatch (2 Leg Max): maks 2 sector / 1 FP'
+        : 'Enhance Multisector Dispatch: rantai bebas (gap ≤1 jam, PIC & REG sama)');
+    }
+
+    function saveHeaderMeta() {
+      try {
+        const period = document.getElementById('hdr-period')?.value || '';
+        const occ = document.getElementById('hdr-occ')?.value || '';
+        localStorage.setItem('aoms_header_meta', JSON.stringify({ period, occ }));
+        showToast('Header disimpan');
+      } catch (e) {}
+    }
+    function loadHeaderMeta() {
+      try {
+        const raw = localStorage.getItem('aoms_header_meta');
+        if (!raw) return;
+        const d = JSON.parse(raw);
+        if (d.period && document.getElementById('hdr-period')) document.getElementById('hdr-period').value = d.period;
+        if (d.occ && document.getElementById('hdr-occ')) document.getElementById('hdr-occ').value = d.occ;
+      } catch (e) {}
+    }
+
+    function openPasteModal() {
+      document.getElementById('paste-modal').classList.remove('hidden');
+      document.getElementById('paste-modal').classList.add('flex');
+      document.getElementById('paste-area').value = '';
+      document.getElementById('paste-status').textContent = 'Tempel data lalu pilih Tinjau Data. Data lama tidak akan berubah sebelum Anda menekan Konfirmasi Update.';
+      document.getElementById('paste-preview').classList.add('hidden');
+      document.getElementById('btn-confirm-update').classList.add('hidden');
+      document.getElementById('btn-preview-data').textContent = 'Tinjau Data';
+      pendingParsedFlights = null;
+      document.getElementById('paste-area').focus();
+    }
+    function closePasteModal() {
+      document.getElementById('paste-modal').classList.add('hidden');
+      document.getElementById('paste-modal').classList.remove('flex');
+      pendingParsedFlights = null;
+    }
+
+    function parseAomsText(text) {
+      // Format tetap (spasi bebas):
+      // DATE  FLIGHT  DEP ARR ETD  ETA  REG        AC  PAX  PIC
+      // 08.09 QG300   CGK MDC 1800 2125 PK-GQC     320 15   Fransisco Redi
+      const lines = text.split('\n');
+      const result = [];
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line) continue;
+        const parts = line.split(/\s+/);
+        // minimal: date flight dep arr etd eta reg ac pax [pic...]
+        if (parts.length < 9) continue;
+        if (!/^\d{2}\.\d{2}$/.test(parts[0])) continue;
+        if (!/^QG\d+/i.test(parts[1])) continue;
+        if (!/^PK-/i.test(parts[6])) continue;
+
+        let date_s = parts[0];
+        let flight = parts[1].toUpperCase();
+        let dep = parts[2].toUpperCase();
+        let arr = parts[3].toUpperCase();
+        let etd = parts[4].padStart(4, '0');
+        let eta = parts[5].padStart(4, '0');
+        let reg = parts[6].toUpperCase();
+        let ac = parts[7];
+        let pax = parseInt(parts[8], 10) || 0;
+        let pic = parts.slice(9).join(' ').trim();
+
+        if (etd === '2400') etd = '0000';
+        if (eta === '2400') eta = '0000';
+
+        result.push({
+          date: date_s,
+          flight_number: flight,
+          dep,
+          arr,
+          etd: etd.slice(0, 2) + ':' + etd.slice(2),
+          eta: eta.slice(0, 2) + ':' + eta.slice(2),
+          reg,
+          ac_type: ac,
+          pax,
+          pic,
+          aircraft: reg.replace(/^PK-/, ''),
+          dxr: '',
+          fp1: '',
+          fp_latest: '',
+          fuel1: '',
+          fuel_latest: '',
+          zfw_fpl1: '',
+          zfw_fpl_latest: '',
+          remarks: ''
+        });
+      }
+      return result;
+    }
+
+    let pendingParsedFlights = null;
+
+    function parseAndApply() {
+      const sourceText = document.getElementById('paste-area').value;
+      const status = document.getElementById('paste-status');
+      const preview = document.getElementById('paste-preview');
+      if (!sourceText.trim()) {
+        status.textContent = 'Teks kosong. Tempel data AOMS dulu.';
+        status.className = 'text-xs text-red-500 mt-2';
+        preview.classList.add('hidden');
+        return;
+      }
+
+      const parsed = parseAomsText(sourceText);
+      if (parsed.length === 0) {
+        status.textContent = 'Tidak ada baris terdeteksi. Format: DATE FLIGHT DEP ARR ETD ETA REG AC PAX PIC';
+        status.className = 'text-xs text-red-500 mt-2';
+        preview.classList.add('hidden');
+        return;
+      }
+
+      pendingParsedFlights = parsed;
+      const uniqueRegs = [...new Set(parsed.map(f => (f.reg || '').trim().toUpperCase()).filter(Boolean))].sort();
+      const totalPax = parsed.reduce((sum, f) => sum + (Number(f.pax) || 0), 0);
+
+      document.getElementById('paste-preview-summary').textContent =
+        `${parsed.length} flight terdeteksi • ${uniqueRegs.length} pesawat aktif (REG berbeda) • ${totalPax.toLocaleString('id-ID')} PAX`;
+      document.getElementById('paste-preview-regs').innerHTML =
+        `<b>Registrasi aktif (${uniqueRegs.length}):</b> ${uniqueRegs.join(', ') || 'Tidak ada REG'}`;
+
+      const previewRows = parsed.slice(0, 30);
+      document.getElementById('paste-preview-rows').innerHTML = previewRows.map((f, i) => `
+        <tr class="bg-white">
+          <td class="px-2 py-1.5 text-slate-400">${i + 1}</td>
+          <td class="px-2 py-1.5 font-semibold">${f.flight_number || '—'}</td>
+          <td class="px-2 py-1.5">${f.dep || '—'} → ${f.arr || '—'}</td>
+          <td class="px-2 py-1.5 font-mono">${f.etd || '—'}</td>
+          <td class="px-2 py-1.5 font-mono">${f.eta || '—'}</td>
+          <td class="px-2 py-1.5 font-mono font-semibold">${f.reg || '—'}</td>
+        </tr>`).join('') + (parsed.length > 30
+          ? `<tr><td colspan="6" class="px-2 py-2 text-center text-slate-400">Dan ${parsed.length - 30} flight lainnya…</td></tr>` : '');
+
+      preview.classList.remove('hidden');
+      status.textContent = 'Pra-tinjau berhasil dibuat. Periksa jumlah flight dan registrasi sebelum melanjutkan.';
+      status.className = 'text-xs text-green-700 mt-2';
+      document.getElementById('btn-preview-data').textContent = 'Tinjau Ulang';
+      document.getElementById('btn-confirm-update').classList.remove('hidden');
+    }
+
+    function confirmParsedUpdate() {
+      if (!pendingParsedFlights || !pendingParsedFlights.length) {
+        showToast('Belum ada data yang ditinjau.');
+        return;
+      }
+
+      // Data aktif baru dipindahkan ke dashboard hanya setelah konfirmasi.
+      flights = pendingParsedFlights;
+      pendingParsedFlights = null;
+      legs = buildLegs();
+      const regs = [...new Set(flights.map(f => f.reg).filter(Boolean))].sort();
+      document.getElementById('filter-reg').innerHTML = '<option value="">Semua Aircraft</option>' +
+        regs.map(r => `<option value="${r}">${r}</option>`).join('');
+      try {
+        localStorage.setItem('aoms_dispatch_data', JSON.stringify({ flights, ts: Date.now() }));
+      } catch(e) {}
+      renderAll();
+      closePasteModal();
+      showToast(`Berhasil update: ${flights.length} flights • ${regs.length} pesawat aktif • ${legs.length} legs`);
+    }
+
+    function init() {
+      // Prefer localStorage (last paste), then embedded AOMS_DATA
+      let loaded = false;
+      try {
+        const saved = localStorage.getItem('aoms_dispatch_data');
+        if (saved) {
+          const d = JSON.parse(saved);
+          if (d.flights && d.flights.length) {
+            flights = d.flights;
+            loaded = true;
+          }
+        }
+      } catch(e) {}
+
+      if (!loaded && typeof AOMS_DATA !== 'undefined') {
+        flights = AOMS_DATA.flights.map(f => ({
+          ...f,
+          dxr: f.dxr || '',
+          fp1: f.fp1 || f.fp || '',
+          fp_latest: f.fp_latest || '',
+          fuel1: f.fuel1 || f.fuel || '',
+          fuel_latest: f.fuel_latest || '',
+          zfw_fpl1: f.zfw_fpl1 || '',
+          zfw_fpl_latest: f.zfw_fpl_latest || '',
+          remarks: f.remarks || ''
+        }));
+        loaded = true;
+      }
+
+      if (!loaded) {
+        showToast('Belum ada data. Klik Paste AOMS untuk input.');
+        return;
+      }
+      flights.forEach(f => {
+        if (f.dxr === undefined) f.dxr = '';
+        // migrate lama → baru
+        if (f.fp1 === undefined) f.fp1 = f.fp || '';
+        if (f.fp_latest === undefined) f.fp_latest = '';
+        if (f.fuel1 === undefined) f.fuel1 = f.fuel || '';
+        if (f.fuel_latest === undefined) f.fuel_latest = '';
+        if (f.zfw_fpl1 === undefined) f.zfw_fpl1 = '';
+        if (f.zfw_fpl_latest === undefined) f.zfw_fpl_latest = '';
+        if (f.remarks === undefined) f.remarks = '';
+      });
+
+      legs = buildLegs();
+      const regs = [...new Set(flights.map(f => f.reg))].sort();
+      document.getElementById('filter-reg').innerHTML = '<option value="">Semua Aircraft</option>' +
+        regs.map(r => `<option value="${r}">${r}</option>`).join('');
+      loadHeaderMeta();
+      initMsal();
+      updateMsButtons();
+      renderAll();
+      showToast(`${flights.length} flights • ${legs.length} legs`);
+    }
+
+    function renderAll() {
+      renderSummary();
+      renderFlightTable();
+      renderLegs();
+    }
+
+    // Shift berdasarkan ETD leg pertama (PIC First Flight):
+    // Pagi  : mulai 03:14 UTC  → sampai sebelum 11:14
+    // Siang : mulai 11:14 UTC  → sampai sebelum 17:45
+    // Malam : mulai 17:45 UTC  → sampai sebelum 03:14 (hari berikutnya)
+    function getShift(etd) {
+      const utc = toUTC(etd);
+      if (utc === '-') return '';
+      const [h, m] = utc.split(':').map(Number);
+      const mins = h * 60 + m;
+      const PAGI_START  = 3 * 60 + 14;   // 03:14
+      const SIANG_START = 11 * 60 + 14;  // 11:14
+      const MALAM_START = 17 * 60 + 45;  // 17:45
+      if (mins >= PAGI_START && mins < SIANG_START) return 'pagi';
+      if (mins >= SIANG_START && mins < MALAM_START) return 'siang';
+      return 'malam'; // 17:45–03:13
+    }
+
+    // Shift untuk suatu flight = ETD leg pertama dari multi-sector-nya
+    function getShiftForIndex(idx) {
+      for (const chain of legs) {
+        if (chain.includes(idx)) {
+          return getShift(flights[chain[0]].etd);
+        }
+      }
+      return getShift(flights[idx]?.etd);
+    }
+    function shiftLabel(s) {
+      return s === 'pagi' ? 'Pagi' : s === 'siang' ? 'Siang' : s === 'malam' ? 'Malam' : '-';
+    }
+    function shiftBadgeClass(s) {
+      return s === 'pagi' ? 'bg-amber-100 text-amber-800' : s === 'siang' ? 'bg-sky-100 text-sky-800' : s === 'malam' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-600';
+    }
+
+    function saveAssignments() {
+      try {
+        localStorage.setItem('aoms_dispatch_data', JSON.stringify({ flights, ts: Date.now() }));
+          showToast('Assignment disimpan (lokal)');
+        if (msAccount) odPush().catch(() => {});
+      } catch(e) { showToast('Gagal simpan'); }
+    }
+
+    // ========== OneDrive / Microsoft Graph ==========
+    const OD_FILE = 'AOMS_Dispatch/aoms_dispatch_data.json';
+    let msalInstance = null;
+    let msAccount = null;
+    const MS_SCOPES = ['User.Read', 'Files.ReadWrite'];
+
+    function getMsConfig() {
+      try {
+        return JSON.parse(localStorage.getItem('aoms_ms_config') || '{}');
+      } catch (e) { return {}; }
+    }
+    function openMsConfig() {
+      const c = getMsConfig();
+      document.getElementById('ms-client-id').value = c.clientId || '';
+      document.getElementById('ms-tenant-id').value = c.tenantId || 'organizations';
+      document.getElementById('ms-config-modal').classList.remove('hidden');
+      document.getElementById('ms-config-modal').classList.add('flex');
+    }
+    function closeMsConfig() {
+      document.getElementById('ms-config-modal').classList.add('hidden');
+      document.getElementById('ms-config-modal').classList.remove('flex');
+    }
+    function saveMsConfig() {
+      const clientId = document.getElementById('ms-client-id').value.trim();
+      const tenantId = document.getElementById('ms-tenant-id').value.trim() || 'organizations';
+      if (!clientId) { showToast('Client ID wajib diisi'); return; }
+      localStorage.setItem('aoms_ms_config', JSON.stringify({ clientId, tenantId }));
+      closeMsConfig();
+      initMsal();
+      showToast('Config Microsoft disimpan');
+    }
+    function setOdStatus(text, online) {
+      const el = document.getElementById('od-status');
+      if (!el) return;
+      el.textContent = text;
+      el.className = 'text-[10px] px-2 py-1 rounded-full ' + (online ? 'bg-emerald-500/30 text-emerald-100' : 'bg-black/20 text-green-100');
+    }
+    function updateMsButtons() {
+      const login = document.getElementById('btn-ms-login');
+      const logout = document.getElementById('btn-ms-logout');
+      if (msAccount) {
+        login.classList.add('hidden');
+        logout.classList.remove('hidden');
+        logout.textContent = (msAccount.name || msAccount.username || 'Sign out').split(' ')[0];
+        setOdStatus('OneDrive: ' + (msAccount.username || 'Online'), true);
+      } else {
+        login.classList.remove('hidden');
+        logout.classList.add('hidden');
+        setOdStatus('OneDrive: Offline', false);
+      }
+    }
+    function initMsal() {
+      const c = getMsConfig();
+      if (!c.clientId || typeof msal === 'undefined') {
+        msalInstance = null;
+        return;
+      }
+      try {
+        msalInstance = new msal.PublicClientApplication({
+          auth: {
+            clientId: c.clientId,
+            authority: 'https://login.microsoftonline.com/' + (c.tenantId || 'organizations'),
+            redirectUri: window.location.href.split('#')[0].split('?')[0]
+          },
+          cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
+        });
+        msalInstance.handleRedirectPromise().then(res => {
+          if (res && res.account) msAccount = res.account;
+          else {
+            const accounts = msalInstance.getAllAccounts();
+            if (accounts.length) msAccount = accounts[0];
+          }
+          updateMsButtons();
+          if (msAccount) odPull().catch(() => {});
+        }).catch(err => console.warn('MSAL redirect', err));
+      } catch (e) {
+        console.warn('MSAL init', e);
+        msalInstance = null;
+      }
+    }
+    async function getMsToken() {
+      if (!msalInstance || !msAccount) throw new Error('Belum login Microsoft');
+      try {
+        const r = await msalInstance.acquireTokenSilent({ scopes: MS_SCOPES, account: msAccount });
+        return r.accessToken;
+      } catch (e) {
+        const r = await msalInstance.acquireTokenPopup({ scopes: MS_SCOPES, account: msAccount });
+        return r.accessToken;
+      }
+    }
+    async function msLogin() {
+      if (!msalInstance) {
+        openMsConfig();
+        showToast('Isi Client ID Azure AD dulu');
+        return;
+      }
+      try {
+        const r = await msalInstance.loginPopup({ scopes: MS_SCOPES });
+        msAccount = r.account;
+        updateMsButtons();
+        showToast('Login Microsoft berhasil');
+        await odPull();
+      } catch (e) {
+        console.error(e);
+        showToast('Login gagal: ' + (e.message || e));
+      }
+    }
+    async function msLogout() {
+      if (!msalInstance) return;
+      try {
+        await msalInstance.logoutPopup({ account: msAccount });
+      } catch (e) {}
+      msAccount = null;
+      updateMsButtons();
+      showToast('Signed out');
+    }
+    function buildOdPayload() {
+      return {
+        flights,
+        header: {
+          period: document.getElementById('hdr-period')?.value || '',
+          occ: document.getElementById('hdr-occ')?.value || ''
+        },
+        pairingMode: getPairingMode(),
+        ts: Date.now(),
+        updatedBy: msAccount ? (msAccount.username || msAccount.name) : 'local'
+      };
+    }
+    async function odPush() {
+      if (!msAccount) return;
+      const token = await getMsToken();
+      const body = JSON.stringify(buildOdPayload());
+      const url = 'https://graph.microsoft.com/v1.0/me/drive/special/approot:/' + encodeURIComponent(OD_FILE) + ':/content';
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error('Upload gagal ' + res.status + ' ' + t.slice(0, 120));
+      }
+      setOdStatus('OneDrive: Synced ' + new Date().toLocaleTimeString(), true);
+      showToast('Tersimpan ke OneDrive');
+    }
+    async function odPull() {
+      if (!msAccount) return;
+      const token = await getMsToken();
+      const url = 'https://graph.microsoft.com/v1.0/me/drive/special/approot:/' + encodeURIComponent(OD_FILE) + ':/content';
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+      if (res.status === 404) {
+        showToast('Belum ada file di OneDrive — akan dibuat saat Simpan');
+        setOdStatus('OneDrive: Ready (kosong)', true);
+        return;
+      }
+      if (!res.ok) throw new Error('Download gagal ' + res.status);
+      const data = await res.json();
+      if (data.flights && data.flights.length) {
+        flights = data.flights;
+        flights.forEach(f => {
+          if (f.dxr === undefined) f.dxr = '';
+          if (f.fp1 === undefined) f.fp1 = f.fp || '';
+          if (f.fp_latest === undefined) f.fp_latest = '';
+          if (f.fuel1 === undefined) f.fuel1 = f.fuel || '';
+          if (f.fuel_latest === undefined) f.fuel_latest = '';
+          if (f.zfw_fpl1 === undefined) f.zfw_fpl1 = '';
+          if (f.zfw_fpl_latest === undefined) f.zfw_fpl_latest = '';
+          if (f.remarks === undefined) f.remarks = '';
+        });
+        try { localStorage.setItem('aoms_dispatch_data', JSON.stringify({ flights, ts: data.ts || Date.now() })); } catch (e) {}
+        if (data.header) {
+          if (data.header.period && document.getElementById('hdr-period')) document.getElementById('hdr-period').value = data.header.period;
+          if (data.header.occ && document.getElementById('hdr-occ')) document.getElementById('hdr-occ').value = data.header.occ;
+        }
+        if (data.pairingMode && document.getElementById('pairing-mode')) {
+          document.getElementById('pairing-mode').value = data.pairingMode;
+        }
+        legs = buildLegs();
+        const regs = [...new Set(flights.map(f => f.reg))].sort();
+        document.getElementById('filter-reg').innerHTML = '<option value="">Semua Aircraft</option>' +
+          regs.map(r => `<option value="${r}">${r}</option>`).join('');
+        renderAll();
+        showToast('Data dimuat dari OneDrive (' + flights.length + ' flights)');
+      }
+      setOdStatus('OneDrive: Synced ' + new Date().toLocaleTimeString(), true);
+    }
+    async function odSyncNow() {
+      if (!msAccount) {
+        showToast('Login Microsoft dulu');
+        return;
+      }
+      try {
+        showToast('Sync OneDrive...');
+        await odPull();
+        await odPush();
+      } catch (e) {
+        console.error(e);
+        showToast('Sync gagal: ' + (e.message || e));
+      }
+    }
+
+    // Map flight index → sector position in multi-sector leg (0 = first/OUT, 1+ = subsequent)
+    function sectorPosMap() {
+      const map = {};
+      legs.forEach(chain => {
+        chain.forEach((fi, si) => { map[fi] = { pos: si, multi: chain.length > 1 }; });
+      });
+      return map;
+    }
+
+    function fuelDifference(fuel1, fuelLatest) {
+      const toNumber = value => {
+        const raw = String(value ?? '').trim();
+        if (!raw) return null;
+        // Fuel dicatat dalam angka/kg; koma dan titik pemisah ribuan diabaikan.
+        const normalized = raw.replace(/[^0-9-]/g, '');
+        if (!normalized || normalized === '-') return null;
+        const n = Number(normalized);
+        return Number.isFinite(n) ? n : null;
+      };
+      const first = toNumber(fuel1);
+      const latest = toNumber(fuelLatest);
+      if (first === null || latest === null) return '—';
+      const diff = latest - first;
+      return (diff > 0 ? '+' : '') + diff.toLocaleString('en-US') + ' kg';
+    }
+
+    function zfwDifference(zfw1, zfwLatest) {
+      const toNumber = value => {
+        const raw = String(value ?? '').trim();
+        if (!raw) return null;
+        const normalized = raw.replace(/[^0-9-]/g, '');
+        if (!normalized || normalized === '-') return null;
+        const n = Number(normalized);
+        return Number.isFinite(n) ? n : null;
+      };
+      const first = toNumber(zfw1);
+      const latest = toNumber(zfwLatest);
+      if (first === null || latest === null) return '—';
+      const diff = latest - first;
+      return (diff > 0 ? '+' : '') + diff.toLocaleString('en-US') + ' kg';
+    }
+
+    function renderFlightTable() {
+      const q = (document.getElementById('search')?.value || '').toLowerCase();
+      const regF = document.getElementById('filter-reg')?.value || '';
+      const shiftF = document.getElementById('filter-shift')?.value || '';
+      const posMap = sectorPosMap();
+
+      // Multi-sector (QG970+QG971) tetap digabung atas-bawah (PIC sama).
+      // Antar leg (PIC berbeda) diurutkan STD leg pertama.
+      const rows = [];
+      const sortedChains = legs
+        .map(chain => ({ chain, first: flights[chain[0]] }))
+        .sort((a, b) => {
+          if (a.first.date !== b.first.date) return a.first.date < b.first.date ? -1 : 1;
+          return timeToMin(a.first.etd) - timeToMin(b.first.etd);
+        });
+
+      sortedChains.forEach(({ chain }) => {
+        const shift = getShift(flights[chain[0]].etd);
+        if (shiftF && shift !== shiftF) return;
+        if (regF && !chain.some(i => flights[i].reg === regF)) return;
+        if (q) {
+          const hay = chain.map(i => {
+            const x = flights[i];
+            return `${x.flight_number} ${x.reg} ${x.pic} ${x.dep} ${x.arr} ${x.dxr||''} ${x.fp1||''} ${x.fp_latest||''} ${x.zfw_fpl1||''} ${x.zfw_fpl_latest||''} ${x.remarks||''}`;
+          }).join(' ').toLowerCase();
+          if (!hay.includes(q)) return;
+        }
+        chain.forEach((idx, si) => {
+          rows.push({
+            f: flights[idx],
+            idx,
+            shift,
+            sec: { pos: si, multi: chain.length > 1 }
+          });
+        });
+      });
+
+      document.getElementById('result-count').textContent = rows.length + ' flight';
+      const tbody = document.getElementById('flight-table-body');
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="19" class="text-center py-8 text-slate-400">Tidak ada data</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(({f, idx, shift, sec}, n) => {
+        const isSecond = sec.multi && sec.pos >= 1;
+        const fp1Val = (f.fp1 || f.fp || '').replace(/"/g, '&quot;');
+        const fpLVal = (f.fp_latest || '').replace(/"/g, '&quot;');
+        const remarksVal = (f.remarks || '').replace(/&/g, '&amp;').replace(/\"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const fuel1Val = (f.fuel1 || f.fuel || '').replace(/"/g, '&quot;');
+        const fuelLVal = (f.fuel_latest || '').replace(/"/g, '&quot;');
+        const zfw1Val = (f.zfw_fpl1 || '').replace(/"/g, '&quot;');
+        const zfwLVal = (f.zfw_fpl_latest || '').replace(/"/g, '&quot;');
+        const fuelDiff = fuelDifference(fuel1Val, fuelLVal);
+        const zfwDiff = zfwDifference(zfw1Val, zfwLVal);
+        const rowBg = isSecond ? 'bg-sky-50/40' : '';
+
+        return `
+        <tr class="hover:bg-slate-50 ${rowBg}">
+          <td class="px-3 py-2.5 text-slate-400">${n+1}</td>
+          <td class="px-3 py-2.5"><span class="px-1.5 py-0.5 rounded text-xs font-semibold ${shiftBadgeClass(shift)}">${shiftLabel(shift)}</span></td>
+          <td class="px-3 py-2.5 font-semibold">${f.flight_number}${isSecond ? ' <span class="text-[10px] text-sky-600 font-bold">S2</span>' : ''}</td>
+          <td class="px-3 py-2.5 bg-emerald-50">
+            <input type="text" value="${(f.reg||'').replace(/"/g,'&quot;')}" data-idx="${idx}" data-field="reg"
+              class="w-full min-w-[72px] border border-emerald-200 rounded px-2 py-1.5 text-sm font-mono font-semibold uppercase focus:ring-2 focus:ring-emerald-400 outline-none bg-white"
+              placeholder="PK-XXX" onchange="onFieldChange(this)" title="Registrasi bisa diubah" />
+          </td>
+          <td class="px-3 py-2.5">${f.dep}→${f.arr}</td>
+          <td class="px-3 py-2.5 bg-cyan-50">
+            <input type="text" inputmode="numeric" maxlength="5" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" value="${toUTC(f.etd) === '-' ? '' : toUTC(f.etd)}" data-idx="${idx}" data-field="etd"
+              class="w-[92px] border border-cyan-200 rounded px-2 py-1.5 text-sm font-mono font-semibold focus:ring-2 focus:ring-cyan-400 outline-none bg-white"
+              onchange="onFieldChange(this)" title="ETD UTC — dapat diubah manual" />
+          </td>
+          <td class="px-3 py-2.5 bg-teal-50">
+            <input type="text" inputmode="numeric" maxlength="5" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:MM" value="${toUTC(f.eta) === '-' ? '' : toUTC(f.eta)}" data-idx="${idx}" data-field="eta"
+              class="w-[92px] border border-teal-200 rounded px-2 py-1.5 text-sm font-mono focus:ring-2 focus:ring-teal-400 outline-none bg-white"
+              onchange="onFieldChange(this)" title="ETA UTC — dapat diubah manual" />
+          </td>
+          <td class="px-3 py-2.5 bg-orange-50">
+            <input type="text" value="${(f.pic||'').replace(/"/g,'&quot;')}" data-idx="${idx}" data-field="pic"
+              class="w-full min-w-[110px] border border-orange-200 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-orange-400 outline-none bg-white"
+              placeholder="PIC / Captain" onchange="onFieldChange(this)" title="PIC bisa diubah" />
+          </td>
+          <td class="px-3 py-2.5">${f.pax}</td>
+          <td class="px-3 py-2.5 bg-sky-50">
+            <input type="text" value="${fp1Val}" data-idx="${idx}" data-field="fp1"
+              class="w-full min-w-[70px] border border-sky-200 rounded px-2 py-1.5 text-sm font-mono focus:ring-2 focus:ring-sky-400 outline-none bg-white"
+              placeholder="FP 1" onchange="onFieldChange(this)" />
+          </td>
+          <td class="px-3 py-2.5 bg-sky-100">
+            <input type="text" value="${fpLVal}" data-idx="${idx}" data-field="fp_latest"
+              class="w-full min-w-[90px] border border-sky-300 rounded px-2 py-1.5 text-sm font-mono focus:ring-2 focus:ring-sky-500 outline-none bg-white"
+              placeholder="FP Latest" onchange="onFieldChange(this)" />
+          </td>
+          <td class="px-3 py-2.5 bg-amber-50 min-w-[280px]">
+            <input type="text" value="${remarksVal}" data-idx="${idx}" data-field="remarks"
+              class="w-full min-w-[260px] border border-amber-200 rounded px-2 py-2 text-sm focus:ring-2 focus:ring-amber-400 outline-none bg-white"
+              placeholder="Remarks untuk flight plan ini..." onchange="onFieldChange(this)" />
+          </td>
+          <td class="px-3 py-2.5 bg-violet-50">
+            <input type="text" value="${fuel1Val}" data-idx="${idx}" data-field="fuel1"
+              class="w-full min-w-[70px] border border-violet-200 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-violet-400 outline-none bg-white"
+              placeholder="Fuel 1" onchange="onFieldChange(this)" />
+          </td>
+          <td class="px-3 py-2.5 bg-violet-100">
+            <input type="text" value="${fuelLVal}" data-idx="${idx}" data-field="fuel_latest"
+              class="w-full min-w-[70px] border border-violet-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-violet-500 outline-none bg-white"
+              placeholder="Fuel Latest" onchange="onFieldChange(this)" />
+          </td>
+          <td class="px-3 py-2.5 bg-violet-50 text-center font-bold text-violet-900 whitespace-nowrap">${fuelDiff}</td>
+          <td class="px-3 py-2.5 bg-rose-50">
+            <input type="text" value="${zfw1Val}" data-idx="${idx}" data-field="zfw_fpl1"
+              class="w-full min-w-[82px] border border-rose-200 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-rose-400 outline-none bg-white"
+              placeholder="ZFW FPL 1" onchange="onFieldChange(this)" />
+          </td>
+          <td class="px-3 py-2.5 bg-rose-100">
+            <input type="text" value="${zfwLVal}" data-idx="${idx}" data-field="zfw_fpl_latest"
+              class="w-full min-w-[92px] border border-rose-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-rose-500 outline-none bg-white"
+              placeholder="ZFW FPL Latest" onchange="onFieldChange(this)" />
+          </td>
+          <td class="px-3 py-2.5 bg-rose-50 text-center font-bold text-rose-900 whitespace-nowrap">${zfwDiff}</td>
+          <td class="px-3 py-2.5 bg-amber-50">
+            <input type="text" value="${(f.dxr||'').replace(/"/g,'&quot;')}" data-idx="${idx}" data-field="dxr"
+              class="w-full min-w-[70px] border border-amber-200 rounded px-2 py-1.5 text-sm font-semibold uppercase focus:ring-2 focus:ring-amber-400 outline-none bg-white"
+              placeholder="DXR" onchange="onFieldChange(this)" />
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    function onFieldChange(el) {
+      const idx = parseInt(el.dataset.idx, 10);
+      const field = el.dataset.field;
+      if (isNaN(idx) || !flights[idx] || !field) return;
+      let val = el.value.trim();
+      if (field === 'dxr' || field === 'reg') val = val.toUpperCase();
+      if ((field === 'etd' || field === 'eta') && val && !/^([01]\d|2[0-3]):[0-5]\d$/.test(val)) {
+        showToast('Format waktu tidak valid. Gunakan HH:MM UTC.');
+        renderFlightTable();
+        return;
+      }
+      flights[idx][field] = val;
+      if (field === 'etd' || field === 'eta') {
+        // Perubahan waktu memengaruhi urutan penerbangan, pairing multisector,
+        // shift, pairing multisector, dan seluruh ringkasan dashboard.
+        legs = buildLegs();
+        renderAll();
+        saveAssignments();
+        showToast(`${field.toUpperCase()} ${flights[idx].flight_number} diperbarui: ${val || '-'} UTC`);
+        return;
+      }
+      if (field === 'reg') {
+        flights[idx].aircraft = val.replace(/^PK-/, '');
+        // REG berubah → pairing multi-sector perlu dihitung ulang
+        legs = buildLegs();
+        const regs = [...new Set(flights.map(f => f.reg))].sort();
+        document.getElementById('filter-reg').innerHTML = '<option value="">Semua Aircraft</option>' +
+          regs.map(r => `<option value="${r}">${r}</option>`).join('');
+        renderAll();
+        return;
+      }
+      if (field === 'pic') {
+        // PIC berubah → pairing multi-sector (same PIC) dihitung ulang
+        legs = buildLegs();
+        renderAll();
+        return;
+      }
+      if (['fuel1', 'fuel_latest', 'zfw_fpl1', 'zfw_fpl_latest', 'remarks', 'fp1', 'fp_latest', 'dxr'].includes(field)) {
+        renderFlightTable(); // perbarui kalkulasi Fuel dan ZFW Difference secara langsung
+        saveAssignments();
+      }
+      renderLegs();
+    }
+
+    function renderSummary() {
+      const totalLegs = legs.length;
+      // Hitung per leg (berdasarkan ETD leg pertama)
+      let pagi = 0, siang = 0, malam = 0;
+      legs.forEach(chain => {
+        const s = getShift(flights[chain[0]].etd);
+        if (s === 'pagi') pagi++;
+        else if (s === 'siang') siang++;
+        else if (s === 'malam') malam++;
+      });
+      const withDxr = flights.filter(f => f.dxr && f.dxr.trim()).length;
+      const activeAircraft = new Set(flights.map(f => (f.reg || '').trim().toUpperCase()).filter(Boolean)).size;
+      const approaching = flights.filter(f => {
+        const m = minutesUntil(f.etd);
+        return m !== null && m >= -30 && m <= 180;
+      }).length;
+      document.getElementById('summary-cards').innerHTML = `
+        <div class="bg-white rounded-xl border p-4 shadow-sm"><div class="text-2xl font-bold">${totalLegs}</div><div class="text-sm text-slate-500">Total Legs</div></div>
+        <div class="bg-white rounded-xl border p-4 shadow-sm"><div class="text-2xl font-bold text-teal-700">${activeAircraft}</div><div class="text-sm text-slate-500">Pesawat Aktif (REG unik)</div></div>
+        <div class="bg-white rounded-xl border p-4 shadow-sm"><div class="text-2xl font-bold text-amber-600">${pagi}</div><div class="text-sm text-slate-500">Shift Pagi (leg)</div></div>
+        <div class="bg-white rounded-xl border p-4 shadow-sm"><div class="text-2xl font-bold text-sky-600">${siang}</div><div class="text-sm text-slate-500">Shift Siang (leg)</div></div>
+        <div class="bg-white rounded-xl border p-4 shadow-sm"><div class="text-2xl font-bold text-indigo-600">${malam}</div><div class="text-sm text-slate-500">Shift Malam (leg)</div></div>
+        <div class="bg-white rounded-xl border p-4 shadow-sm"><div class="text-2xl font-bold text-emerald-600">${withDxr}</div><div class="text-sm text-slate-500">Sudah di-assign DXR</div></div>
+        <div class="bg-white rounded-xl border p-4 shadow-sm"><div class="text-2xl font-bold text-red-600">${approaching}</div><div class="text-sm text-slate-500">Within 3h ETD</div></div>
+      `;
+    }
+
+    function legIsApproaching(chain) {
+      // true if ANY sector ETD is within -30..180 min
+      return chain.some(i => {
+        const m = minutesUntil(flights[i].etd);
+        return m !== null && m >= -30 && m <= 180;
+      });
+    }
+
+    function soonestMins(chain) {
+      let best = Infinity;
+      chain.forEach(i => {
+        const m = minutesUntil(flights[i].etd);
+        if (m !== null && m < best) best = m;
+      });
+      return best === Infinity ? null : best;
+    }
+
+    function renderLegCard(chain, ci) {
+      const fs = chain.map(i => flights[i]);
+      const first = fs[0];
+      const mins = soonestMins(chain);
+      const urgent = mins !== null && mins <= 60;
+      const soon = mins !== null && mins <= 120;
+      const ring = (mins !== null && mins >= -30 && mins <= 180)
+        ? (urgent ? 'ring-2 ring-red-400 border-red-300' : soon ? 'ring-2 ring-amber-400 border-amber-300' : 'ring-1 ring-green-300 border-green-200')
+        : 'border-slate-200';
+
+      const sectors = fs.map((f, si) => {
+        const etdUTC = toUTC(f.etd);
+        const etaUTC = toUTC(f.eta);
+        const label = si === 0 ? 'OUT' : (si === fs.length - 1 && fs.length > 1 ? 'IN' : `S${si + 1}`);
+        const labelColor = si === 0 ? 'text-blue-600' : 'text-emerald-600';
+        const sectorMins = minutesUntil(f.etd);
+        const hot = sectorMins !== null && sectorMins >= -30 && sectorMins <= 180;
+        const isSecond = si >= 1 && fs.length > 1;
+        const fp1 = (f.fp1 || f.fp || '').trim();
+        const fpL = (f.fp_latest || '').trim();
+        const fuel1 = (f.fuel1 || f.fuel || '').trim();
+        const fuelL = (f.fuel_latest || '').trim();
+        const zfw1 = (f.zfw_fpl1 || '').trim();
+        const zfwL = (f.zfw_fpl_latest || '').trim();
+        const remarks = (f.remarks || '').trim();
+        // Semua sector menampilkan FP 1 / FP Latest / Fuel 1 / Fuel Latest
+        const fpBlock = `<div class="mt-1.5 space-y-0.5 text-xs">
+              <div><span class="text-slate-400">FP 1</span> ${fp1 ? `<span class="text-sky-700 font-mono font-semibold">${fp1}</span>` : '<span class="text-slate-300">—</span>'}</div>
+              <div><span class="text-slate-400">FP Latest</span> ${fpL ? `<span class="text-sky-900 font-mono font-bold">${fpL}</span>` : '<span class="text-slate-300">—</span>'}</div>
+            </div>
+            <div class="mt-1 space-y-0.5 text-xs">
+              <div><span class="text-slate-400">Fuel 1</span> ${fuel1 ? `<span class="text-violet-700 font-semibold">${fuel1}</span>` : '<span class="text-slate-300">—</span>'}</div>
+              <div><span class="text-slate-400">Fuel Latest</span> ${fuelL ? `<span class="text-violet-900 font-bold">${fuelL}</span>` : '<span class="text-slate-300">—</span>'}</div>
+              <div><span class="text-slate-400">Fuel Difference</span> <span class="text-violet-900 font-bold">${fuelDifference(fuel1, fuelL)}</span></div>
+              <div><span class="text-slate-400">ZFW FPL 1</span> ${zfw1 ? `<span class="text-rose-700 font-semibold">${zfw1}</span>` : '<span class="text-slate-300">—</span>'}</div>
+              <div><span class="text-slate-400">ZFW FPL Latest</span> ${zfwL ? `<span class="text-rose-900 font-bold">${zfwL}</span>` : '<span class="text-slate-300">—</span>'}</div>
+              <div><span class="text-slate-400">ZFW Difference</span> <span class="text-rose-900 font-bold">${zfwDifference(zfw1, zfwL)}</span></div>
+            </div>`;
+        return `<div class="flex-1 bg-white rounded-lg border ${hot ? 'border-red-200 bg-red-50/30' : isSecond ? 'border-sky-200' : 'border-slate-200'} p-2.5 min-w-[160px]">
+          <div class="flex justify-between items-center mb-1">
+            <span class="text-xs font-bold ${labelColor}">${label}</span>
+            <span class="font-bold text-sm text-slate-800">${f.flight_number}</span>
+          </div>
+          <div class="text-sm font-semibold text-slate-700">${f.dep} → ${f.arr}</div>
+          <div class="mt-1.5 flex gap-3 text-sm">
+            <div><span class="text-slate-400">ETD UTC</span> <span class="font-mono font-bold text-slate-800">${etdUTC}</span></div>
+            <div><span class="text-slate-400">ETA UTC</span> <span class="font-mono font-bold text-slate-800">${etaUTC}</span></div>
+          </div>
+          ${fpBlock}
+          ${remarks ? `<div class="mt-2 rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-xs text-amber-900"><span class="font-bold">Remarks:</span> ${remarks.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>` : ''}
+          <div class="text-xs text-slate-500 mt-1">PAX ${f.pax}</div>
+        </div>`;
+      }).join('<div class="flex items-center text-slate-300 text-lg px-0.5">→</div>');
+
+      const dxrs = [...new Set(fs.map(f => (f.dxr||'').trim()).filter(Boolean))];
+      const legShift = getShift(first.etd); // shift = ETD leg pertama (PIC First Flight)
+      return `<div class="rounded-xl border bg-slate-50/80 overflow-hidden shadow-sm ${ring}">
+        <div class="px-3 py-2 bg-gradient-to-r from-slate-100 to-slate-50 border-b border-slate-200 flex flex-wrap items-center gap-3 text-sm">
+          <span class="text-slate-400 font-mono">#${ci + 1}</span>
+          <span class="px-1.5 py-0.5 rounded text-xs font-semibold ${shiftBadgeClass(legShift)}">${shiftLabel(legShift)}</span>
+          <span class="font-bold text-slate-800 text-sm">${first.reg}</span>
+          <span class="text-slate-500">${first.ac_type}</span>
+          <span class="text-slate-600">PIC: <b class="text-slate-800">${first.pic}</b></span>
+          ${dxrs.length ? `<span class="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">DXR: ${dxrs.join(', ')}</span>` : ''}
+          <span class="text-slate-400 ml-auto">${fs.length} sector${fs.length > 1 ? 's' : ''}</span>
+        </div>
+        <div class="p-2 flex flex-wrap gap-1 items-stretch">${sectors}</div>
+      </div>`;
+    }
+
+    function renderLegs() {
+      const q = (document.getElementById('search')?.value || '').toLowerCase();
+      const regF = document.getElementById('filter-reg')?.value || '';
+      const shiftF = document.getElementById('filter-shift')?.value || '';
+      const onlyNear = document.getElementById('filter-approaching-only')?.checked;
+
+      const visible = legs.filter(chain => {
+        const fs = chain.map(i => flights[i]);
+        if (regF && !fs.some(f => f.reg === regF)) return false;
+        // Filter shift berdasarkan ETD leg pertama saja
+        if (shiftF && getShift(fs[0].etd) !== shiftF) return false;
+        if (onlyNear && !legIsApproaching(chain)) return false;
+        if (q) {
+          const hay = fs.map(f => `${f.flight_number} ${f.reg} ${f.pic} ${f.dep} ${f.arr} ${f.dxr||''}`).join(' ').toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      document.getElementById('result-count').textContent = visible.length + ' legs';
+      const body = document.getElementById('legs-body');
+      if (!visible.length) {
+        body.innerHTML = '<div class="text-center text-slate-400 py-10">Tidak ada data</div>';
+        return;
+      }
+      body.innerHTML = visible.map((chain, ci) => renderLegCard(chain, ci)).join('');
+    }
+
+    async function exportPNG() {
+      showToast('Membuat PNG...');
+      const canvas = await html2canvas(document.getElementById('dashboard-content'), { scale: 1.3, backgroundColor: '#f1f5f9' });
+      const a = document.createElement('a'); a.download = 'AOMS_Dispatch.png'; a.href = canvas.toDataURL(); a.click();
+    }
+    async function exportPDF() {
+      showToast('Membuat PDF...');
+      const canvas = await html2canvas(document.getElementById('dashboard-content'), { scale: 1.1, backgroundColor: '#f1f5f9' });
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ orientation: 'l', unit: 'px', format: [canvas.width, canvas.height] });
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.85), 'JPEG', 0, 0, canvas.width, canvas.height);
+      pdf.save('AOMS_Dispatch.pdf');
+    }
+
+    init();
+  </script>
+</body>
+</html>
